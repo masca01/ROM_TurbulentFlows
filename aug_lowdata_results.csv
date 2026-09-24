@@ -1,0 +1,5 @@
+dataset,data_frac,run,n_real,n_aug,n_val,noise_level,latent,beta,best_val_loss,best_val_Ek,best_detR
+TensorRe160,0.0100,baseline,5,0,100,0.1,2,0.005,0.297764,69.5315,0.885583
+TensorRe160,0.0100,augmented,5,25,100,0.1,2,0.005,0.248007,74.6372,0.739225
+TensorRe160,0.0200,baseline,10,0,100,0.1,2,0.005,0.045231,96.8607,0.993610
+TensorRe160,0.0200,augmented,10,50,100,0.1,2,0.005,0.037839,97.6794,0.952322

@@ -1,0 +1,5 @@
+label,use_aug,n_train,n_real,n_aug,n_val,best_val_loss,best_val_Ek,best_detR
+gaussian,False,4522,4522,0,502,0.142840,84.2293,0.996783
+gaussian,True,9044,4522,4522,502,0.168346,80.8858,0.987909
+highmodes,True,9044,4522,4522,502,0.162345,81.6534,0.976976
+joint,True,9044,4522,4522,502,0.135790,85.2085,0.996523

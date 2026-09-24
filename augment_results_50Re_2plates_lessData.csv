@@ -1,0 +1,12 @@
+label,use_aug,n_train,n_real,n_aug,n_val,best_val_loss,best_val_Ek,best_detR
+galerkin_ns_ensemble,False,50,50,0,20,0.085049,83.7601,0.997899
+galerkin_ns_ensemble,False,50,50,0,20,0.085049,83.7602,0.997900
+galerkin_ns_ensemble,True,250,50,200,20,0.087231,83.0194,0.996638
+galerkin_ns_ensemble,True,250,50,200,20,0.087234,83.0194,0.996637
+galerkin_ns_ensemble,False,10,10,0,20,0.123560,72.2240,0.988579
+galerkin_ns_ensemble,True,210,10,200,20,0.144592,68.7447,0.650547
+galerkin_ns_ensemble,False,30,30,0,20,0.090567,80.0900,0.974574
+galerkin_ns_ensemble,True,230,30,200,20,0.098450,79.3383,0.986566
+galerkin_ns_ensemble,True,230,30,200,20,0.083858,82.4545,0.992053
+galerkin_ns_ensemble,True,230,30,200,20,0.067528,87.4504,0.997306
+galerkin_ns_ensemble,True,217,30,187,20,0.082048,82.4458,0.965816

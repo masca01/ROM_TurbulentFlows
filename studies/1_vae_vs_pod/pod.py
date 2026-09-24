@@ -3,9 +3,13 @@ POD for turbulent flow ROM  (universal)
 Supports: ModelFLOW (Tensor), BOX (U 3-comp), CHANNEL (UW or U), ChannelEdge
 
 Requirements: pip install numpy scipy matplotlib
+
+Usage:
+    python3 pod.py                  # DATA_FILE of the CONFIG block
+    python3 pod.py --data FILE      # another file
 """
 
-import os
+import os, sys
 import numpy as np
 import scipy.io as sio
 import scipy.linalg as la
@@ -213,6 +217,10 @@ def plot_ek(ranks, ek_c, ek_all, comp_names):
 
 def main():
     global DATA_FILE
+    it = iter(sys.argv[1:])
+    for a in it:                    # --data FILE overrides the CONFIG block
+        if a == "--data": DATA_FILE = next(it)
+        else: raise SystemExit(f"unknown argument {a!r}; use --data FILE")
 
     if not DATA_FILE:
         DATA_FILE = pick_file(_DATA_DIR)

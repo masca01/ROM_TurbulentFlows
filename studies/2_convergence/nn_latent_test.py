@@ -16,6 +16,7 @@ from the command line:
     python3 nn_latent_test.py tail Re60=10,14 Re70=12,16,20
     python3 nn_latent_test.py random Re100=20      # random split instead
     python3 nn_latent_test.py tail all=8,12        # same dims for every dataset
+    python3 nn_latent_test.py tail all=3 --epochs 1   # quick check
 
 Output: one line per training appended to
         ../../convergence/nn_latent_test[_tailval].csv
@@ -78,11 +79,16 @@ DEVICE = bv.DEVICE
 
 
 def _parse_cli(argv):
-    """[split] [Re60=10,14 ...] [all=8,12]  ->  (split, {Re: [dims]})"""
+    """[split] [Re60=10,14 ...] [all=8,12] [--epochs N]  ->  (split, {Re: [dims]})"""
+    global N_EPOCHS
     split = SPLIT
     latent = {re_: (list(v) if isinstance(v, (list, tuple)) else [v])
               for re_, v in LATENT.items()}
-    for a in argv:
+    it = iter(argv)
+    for a in it:
+        if a == "--epochs":
+            N_EPOCHS = int(next(it))
+            continue
         if a in cs.MODES:
             split = a
             continue

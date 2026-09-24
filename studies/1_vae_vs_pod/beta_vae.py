@@ -1,8 +1,12 @@
 """
 beta-VAE for turbulent flow ROM
+
+Usage:
+    python3 beta_vae.py                          # DATA_FILE and N_EPOCHS of the CONFIG block
+    python3 beta_vae.py --data FILE --epochs 2   # another file / a quick check
 """
 
-import os
+import os, sys
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -66,8 +70,19 @@ def mean_field(data):
 
 # ─────────────────────────── Main ───────────────────────────
 
+def _cli(argv):
+    """--data FILE and --epochs N override the CONFIG block."""
+    global DATA_FILE, N_EPOCHS
+    it = iter(argv)
+    for a in it:
+        if a == "--data": DATA_FILE = next(it)
+        elif a == "--epochs": N_EPOCHS = int(next(it))
+        else: raise SystemExit(f"unknown argument {a!r}; see the docstring")
+
+
 def main():
     global DATA_FILE
+    _cli(sys.argv[1:])
 
     if not DATA_FILE:
         DATA_FILE = pick_file(_DATA_DIR)

@@ -28,7 +28,8 @@ NOTE this is far heavier than the POD study: it trains (roughly) len(n_vals)*m
 networks.  Keep N_STEP / M_REPS / N_EPOCHS modest, or bump them when you have
 time.  Nothing is saved except the summary .mat + the shown plot.
 
-Usage:  python3 nn_convergence.py <file.mat> <T_MAX> <LATENT_DIM> [SPLIT]
+Usage:  python3 nn_convergence.py <file.mat> <T_MAX> <LATENT_DIM> [SPLIT] [--epochs N]
+        --epochs N (anywhere) replaces the 500 training epochs, for a quick check.
         SPLIT = random (default: validation = random 10%), tail (validation =
         the LAST 10% of the record) tail5 (the LAST 5%) or tail2.5 (the LAST 2.5%); see convergence_split.py.
 
@@ -51,19 +52,25 @@ from rom import paths
 # ------------ Folder layout (rom/paths.py) ------------
 _DATA_DIR = paths.DATA
 
+# positional arguments, without the optional --epochs N
+_ARGV = list(sys.argv)
+_EPOCHS_CLI = None
+if "--epochs" in _ARGV:
+    _i = _ARGV.index("--epochs"); _EPOCHS_CLI = int(_ARGV[_i + 1]); del _ARGV[_i:_i + 2]
+
 # ============ CONFIG ============
 # DATA_FILE and the snapshot cap can be overridden on the command line so the
 # same script runs over the whole Alpha0 Re-sweep, e.g.
 #   python3 nn_convergence.py .../Alpha0/dataRe60Alpha0_2.mat 1500
 _DEFAULT_FILE = ("/Users/vmascarilla/Desktop/MMAE/597 - Special Topics/CODING/"
                  "DATA/Alpha0/dataRe50Alpha0_2.mat")
-DATA_FILE = sys.argv[1] if len(sys.argv) > 1 else _DEFAULT_FILE
+DATA_FILE = _ARGV[1] if len(_ARGV) > 1 else _DEFAULT_FILE
 COMP_IDX  = None      # None = auto-detect velocity components
 
 # temporal subsampling: cap every dataset at T_MAX = 1500 (the minimum snapshot
 # count across the Alpha0 Re-sweep) so all four share the SAME snapshot budget.
 T_STRIDE  = 1         # keep every snapshot (dt = 0.2)
-T_MAX     = int(sys.argv[2]) if len(sys.argv) > 2 else 1500   # common budget
+T_MAX     = int(_ARGV[2]) if len(_ARGV) > 2 else 1500   # common budget
 
 N_HEAD    = [5, 10, 15, 20, 30, 50, 100, 150, 250, 400]  # explicit early sweep points
 TAIL_STEP = 250       # after the head, continue in steps of 250 ...
@@ -74,16 +81,16 @@ PROG_EVERY = 50       # print a training-progress line every this many epochs
 
 # VAE hyperparameters (fixed across the sweep; LATENT_DIM is per-dataset and the
 # driver passes it: Re50=5, Re60=7, Re70=9, Re80=11, Re100=15)
-LATENT_DIM = int(sys.argv[3]) if len(sys.argv) > 3 else 5
+LATENT_DIM = int(_ARGV[3]) if len(_ARGV) > 3 else 5
 BETA       = 5e-3
 BATCH_SIZE = 32
-N_EPOCHS   = 500
+N_EPOCHS   = 500 if _EPOCHS_CLI is None else _EPOCHS_CLI
 LR         = 3e-4
 
 # SPLIT: how the validation set is chosen — "random" (10% at random, the original
 # results) or "tail" (the LAST 10% of the record).  Each mode writes to its OWN
 # folder / CSV so the two never overwrite each other (convergence_split.py).
-SPLIT      = cs.check_mode(sys.argv[4] if len(sys.argv) > 4 else "random")
+SPLIT      = cs.check_mode(_ARGV[4] if len(_ARGV) > 4 else "random")
 VAL_FRAC = cs.val_frac(SPLIT)   # validation fraction of THIS split mode (0.10 or 0.025)
 _AUG_DIR   = cs.aug_dir(SPLIT)
 

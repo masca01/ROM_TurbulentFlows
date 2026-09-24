@@ -28,6 +28,10 @@ end (unless BUILD_EXCEL is False):
        Summary sheet + a sheet per dataset from the _pod95_/_pod99_/_nn_
        convergence.mat bundles in ../DATA/AUGMENTED[_TAILVAL]/.
 
+Usage:  python3 run_alpha0_convergence.py [--plan] [--epochs N]
+        --plan      list the sub-runs of the configured SPLIT and stop
+        --epochs N  passed to nn_convergence.py (quick check instead of 500 epochs)
+
 Note: the beta-VAE runs are the expensive part (training a VAE at every sweep
 point, for every dataset).  Set RUN_NN = False to do just the (much faster) POD
 sweeps first.
@@ -109,7 +113,14 @@ _ENV = dict(os.environ, MPLBACKEND="Agg",   # never pop up a window in batch mod
             PYTHONUNBUFFERED="1")            # stream child stdout live (no buffering)
 
 
+PLAN = False            # --plan: print the commands only
+NN_EPOCHS = None        # --epochs N: passed to nn_convergence.py
+
+
 def _run(script, *args):
+    if PLAN:
+        print(f">>> would run  {script} {' '.join(map(str, args))}", flush=True)
+        return
     cmd = [sys.executable, os.path.join(_HERE, script), *map(str, args)]
     print(f"\n>>> {' '.join(os.path.basename(c) for c in cmd)}", flush=True)
     t0 = time.time()
@@ -127,6 +138,12 @@ def _run(script, *args):
 
 
 def main():
+    global PLAN, NN_EPOCHS
+    it = iter(sys.argv[1:])
+    for a in it:
+        if a == "--plan": PLAN = True
+        elif a == "--epochs": NN_EPOCHS = int(next(it))
+        else: raise SystemExit(f"unknown argument {a!r}; use --plan / --epochs N")
     if SPLIT not in DATASETS:
         raise SystemExit(f"SPLIT must be one of {list(DATASETS)}, got {SPLIT!r}")
     cfg = RUN[SPLIT]
@@ -150,7 +167,8 @@ def main():
                     continue
                 _run("pod_convergence.py", path, CAP, modes[lv], lv, SPLIT)
         if cfg["RUN_NN"]:
-            _run("nn_convergence.py", path, CAP, latent, SPLIT)
+            _run("nn_convergence.py", path, CAP, latent, SPLIT,
+                 *(["--epochs", NN_EPOCHS] if NN_EPOCHS is not None else []))
 
     if BUILD_EXCEL:
         _run("make_alpha0_excel.py", SPLIT)  # one combined Excel for THIS split

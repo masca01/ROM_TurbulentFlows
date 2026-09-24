@@ -7,7 +7,7 @@ Inputs:  model_betaVAE_*.pt   (from beta_vae.py)
 
 """
 
-import os, math
+import os, sys, math
 import numpy as np
 import scipy.io as sio
 import scipy.signal as sig
@@ -466,6 +466,12 @@ def fig_field_comparison(data, data_n, enc, dec, Phi, sing, Vsvd, Umean,
 
 def main():
     global VAE_FILE, POD_FILE, DATA_FILE
+    it = iter(sys.argv[1:])
+    for a in it:                    # --vae PT --pod NPZ --data FILE override the CONFIG block
+        if a == "--vae": VAE_FILE = next(it)
+        elif a == "--pod": POD_FILE = next(it)
+        elif a == "--data": DATA_FILE = next(it)
+        else: raise SystemExit(f"unknown argument {a!r}; use --vae PT --pod NPZ --data FILE")
 
     if not VAE_FILE:
         VAE_FILE = pick_file("Select beta-VAE checkpoint (.pt)",

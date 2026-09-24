@@ -31,7 +31,7 @@ Use the same Python that runs your scripts (Terminal and IDLE):
 
 ```bash
 cd ROM_TurbulentFlows
-python3 -m pip install -r requirements.txt     # pinned versions the refactor was verified with
+python3 -m pip install -r requirements.txt     # minimum versions; never downgrades or forces upgrades
 python3 -m pip install -e .                    # makes `rom` importable from anywhere
 ```
 

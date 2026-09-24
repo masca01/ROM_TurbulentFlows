@@ -1,10 +1,11 @@
-# Exactly the third-party packages the code imports, pinned to the versions the refactor
-# was verified with (Python 3.11, CPU). Install with:  python3 -m pip install -r requirements.txt
-numpy==2.4.6
-scipy==1.17.1
-torch==2.14.0
-h5py==3.16.0
-matplotlib==3.11.2
-openpyxl==3.1.5
+# The third-party packages the code imports, as minimum versions. The code was verified
+# with these on the Mac (Python 3.14, MPS/CPU) and with newer ones in the cloud
+# (Python 3.11, CPU). Install with:  python3 -m pip install -r requirements.txt
+numpy>=2.4
+scipy>=1.17
+torch>=2.10
+h5py>=3.15
+matplotlib>=3.10
+openpyxl>=3.1
 # tests only
-pytest==9.1.1
+pytest>=8

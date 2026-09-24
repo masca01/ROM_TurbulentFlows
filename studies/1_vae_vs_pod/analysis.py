@@ -325,7 +325,7 @@ def fig_error_vs_modes(pod_ranks, ek_pod_all, Z, dec, data_n, std_C, tr_idx, val
         with torch.no_grad():
             for t in idx_set:
                 z_full = torch.zeros(1, latent_dim, device=DEVICE)
-                z_full[0, active_dims] = torch.tensor(Z[t, active_dims])
+                z_full[0, active_dims] = torch.tensor(Z[t, active_dims], device=DEVICE)
                 xhat = dec(z_full).cpu().numpy()[0]   # [C, H, W]
                 diff = data_n[t] - xhat
                 for c in range(C):

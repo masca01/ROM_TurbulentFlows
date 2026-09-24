@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Data, checkpoints and results live outside the repo (../DATA, ../bestModels, ../../convergence)
+*.pt
+*.npz
+*.mat
+*.xlsx
+*.log
+convergence/

@@ -1,11 +1,11 @@
 # Removed files
 
 Everything below was deleted from the tree in the cleanup. Nothing is lost: the whole
-project before the cleanup is tagged `pre-cleanup`, so any file comes back with
+project before the cleanup is commit `6356347` (on GitHub, so every clone has it), so any file comes back with
 
-    git show pre-cleanup:<file> > <file>
+    git show 6356347:<file> > <file>
 
-(or `git checkout pre-cleanup -- <file>` to restore it in place).
+(or `git checkout 6356347 -- <file>` to restore it in place).
 
 ## Deleted
 

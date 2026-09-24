@@ -292,7 +292,7 @@ def stage_b(o):
                     step, s, to_b, from_b = model_at(l_big, q_big, kappa, A, K, dt, SUBSTEPS)
                     qerr, _ = fidelity(step, to_b, from_b, win_A, steps) if win_A else (None, "")
                     del l_big, q_big
-                    print(f"[low]  quality error {qerr:.3f}", flush=True)
+                    print(f"[low]  quality error {'-' if qerr is None else f'{qerr:.3f}'}", flush=True)
 
                 for gen, f, ep in arms:
                     ep = ep or o["epochs"]

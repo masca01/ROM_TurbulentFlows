@@ -14,8 +14,9 @@ import numpy as np
 import h5py
 import matplotlib.pyplot as plt
 
-FILE = ("/Users/vmascarilla/Desktop/MMAE/597 - Special Topics/CODING/DATA/"
-        "2PlatesGap/dataRe50Alpha0_2.mat")
+from rom import paths
+
+FILE = os.path.join(paths.DATA, "Alpha0", "dataRe50Alpha0_2.mat")   # the file every study reads
 SNAP = 2500            # which snapshot to show (0 .. Nt-1)
 XLIM = (-3, 25)        # zoom window in x around the plates + near wake
 YLIM = (-6, 6)         # zoom window in y

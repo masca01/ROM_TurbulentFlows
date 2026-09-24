@@ -10,12 +10,12 @@ Requirements: pip install torch numpy scipy matplotlib
 
 import os, math
 import numpy as np
-import scipy.io as sio
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 
 from rom import paths
+from rom.data import load_data
 
 # ── Folder layout (rom/paths.py) ──────────────────────────────
 _DATA_DIR   = paths.DATA
@@ -56,50 +56,8 @@ def _pick_file(title, start_dir, ftype):
 
 # ─────────────────────── Data loading ───────────────────────
 
-def _read_field(S, key, is_hdf5):
-    arr = np.array(S[key], dtype=np.float32)
-    if is_hdf5:
-        arr = arr.T
-    return arr
-
-
-def load_data(path, comp_idx=None):
-    import h5py
-    fh = None
-    try:
-        S = sio.loadmat(path, simplify_cells=True)
-        is_hdf5 = False
-    except NotImplementedError:
-        fh = h5py.File(path, "r")
-        S = fh
-        is_hdf5 = True
-    try:
-        if "Tensor" in S:
-            T = _read_field(S, "Tensor", is_hdf5)
-            C, N1, N2, Nt = T.shape
-            data = T.transpose(3, 0, 1, 2)
-            names = {2: ["u", "v"], 3: ["u", "v", "w"]}.get(C, [f"c{i}" for i in range(C)])
-        elif "U" in S:
-            V = _read_field(S, "U", is_hdf5)
-            Nt, Nz, Nx, C_all = V.shape
-            if comp_idx is None:
-                comp_idx = [0, 2] if C_all == 3 else list(range(C_all))
-            V = V[:, :, :, comp_idx]
-            data = V.transpose(0, 3, 1, 2)
-            all_names = ["u", "v", "w"]
-            names = [all_names[i] for i in comp_idx]
-        elif "UW" in S:
-            V = _read_field(S, "UW", is_hdf5)
-            data = V.transpose(0, 3, 1, 2)
-            names = ["u", "w"]
-        else:
-            visible = [k for k in S.keys() if not k.startswith("#")]
-            raise ValueError(f"Unknown format. Fields: {visible}")
-    finally:
-        if fh is not None:
-            fh.close()
-    print(f"Loaded  {os.path.basename(path)}  →  {data.shape}  comps={names}")
-    return data, names
+# load_data: rom.data.load_data (every layout: Tensor, U, UW, the 2-plates DataU/DataV
+# and the Alpha0 U/V files; before, this script had its own copy without the last two)
 
 
 # ─────────────────────── Network ────────────────────────────

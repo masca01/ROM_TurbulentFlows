@@ -157,10 +157,6 @@ def test_study_dry_run(case):
     run_script(*case)
 
 
-@pytest.mark.xfail(raises=ValueError, strict=False,
-                   reason="pre-existing bug in analysis.py (unchanged from pre-cleanup): fig_error_vs_modes "
-                          "indexes a torch tensor with order = np.argsort(...)[::-1], a negative-stride array "
-                          "that current torch rejects")
 def test_analysis_after_pod_and_vae():
     """analysis.py needs the two files the first two dry runs wrote."""
     pt = [f for f in os.listdir(MODELS) if f.startswith("model_betaVAE_channel_fake")]
@@ -202,3 +198,56 @@ def test_every_module_imports():
                         runpy.run_path(os.path.join(root, f), run_name="imported")
     finally:
         sys.argv = old
+
+
+# ------------------------------------------------------------------ fixed bugs
+
+def test_study1_scripts_read_flat_plate_data():
+    """pod.py / analysis.py / inspect_vae.py used their own loader, which could not read the
+    2-plates or Alpha0 files; they now use rom.data.load_data."""
+    run_script(S + "1_vae_vs_pod/pod.py", "--data", RE100)
+    assert os.path.exists(os.path.join(MODELS, "pod_Data2PlatesGap1Re100.npz"))
+
+
+def test_beta_vae_is_reproducible():
+    """beta_vae.py now seeds torch: two runs give the same weights."""
+    import torch
+    out = []
+    for _ in range(2):
+        run_script(S + "1_vae_vs_pod/beta_vae.py", "--data", RE100, "--epochs", 1)
+        ck = torch.load(os.path.join(MODELS, "model_betaVAE_Data2PlatesGap1Re100_lat5_b8e-04_ep1.pt"),
+                        weights_only=False)
+        out.append(ck["enc_state"])
+    assert all(torch.equal(out[0][k], out[1][k]) for k in out[0])
+
+
+def test_show_dataset_default_file_and_argument():
+    import matplotlib
+    matplotlib.use("Agg")
+    g = runpy.run_path(os.path.join(REPO, "tools/show_dataset.py"), run_name="imported")
+    assert g["FILE"] == os.path.join(DATA, "Alpha0", "dataRe50Alpha0_2.mat")
+    g = runpy.run_path(os.path.join(REPO, "tools/show_dataset.py"), run_name="imported")["main"].__globals__
+    g["SNAP"] = 10                                   # the fake record is shorter than snapshot 2500
+    old, sys.argv = sys.argv, ["show_dataset.py", RE50]
+    try:
+        g["main"]()
+    finally:
+        sys.argv = old
+    assert os.path.exists(os.path.join(DATA, "Alpha0", "dataRe50Alpha0_2_preview.png"))
+
+
+def test_headroom_t_value_matches_old_table_and_student_t():
+    from scipy.stats import t
+    table = {n: round(float(t.ppf(0.975, n - 1)), 3) for n in range(2, 11)}
+    assert (table[3], table[5], table[8], table[10]) == (4.303, 2.776, 2.365, 2.262)   # unchanged cells
+    assert (table[2], table[4], table[6], table[7]) == (12.706, 3.182, 2.571, 2.447)   # were 2.262
+
+
+def test_assess_pod_keeps_the_matplotlib_backend():
+    import matplotlib
+    matplotlib.use("pdf")
+    d, _ = data.load_data(RE100)
+    pod.assess_pod(d[:120], d[250:270], 4, n_step=60)
+    assert matplotlib.get_backend().lower() == "pdf"
+    assert os.path.exists(os.path.join(RESULTS, "re100_pod_convergence_k4.png"))
+    matplotlib.use("Agg")

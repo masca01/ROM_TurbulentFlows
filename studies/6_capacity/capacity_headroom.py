@@ -18,6 +18,7 @@ Output: ../../convergence/headroom_corrected.csv, one row per augmented training
 of how many cells and how many screening decisions actually change.
 """
 import csv, os, statistics as st, collections
+from scipy.stats import t as t_dist
 
 from rom import paths
 
@@ -142,7 +143,9 @@ def main():
         w.writeheader()
         for k, d in cells.items():
             n = len(d["g"])
-            half = (4.303 if n == 3 else 2.776 if n == 5 else 2.365 if n == 8 else 2.262) * \
+            # 95 % Student-t half-width, t for n - 1 degrees of freedom (3 decimals, as the
+            # old table 4.303 / 2.776 / 2.365 / 2.262 for n = 3 / 5 / 8 / 10)
+            half = round(float(t_dist.ppf(0.975, n - 1)), 3) * \
                    (st.stdev(d["g"]) / math.sqrt(n)) if n > 1 else float("nan")
             mean = st.mean(d["g"])
             w.writerow(dict(source_file=k[0], dataset=k[1], latent=k[3], n_real=k[2], generator=k[4],

@@ -87,8 +87,9 @@ How does a β-VAE compare with the linear POD basis on one dataset?
 | `python3 beta_vae.py [--data FILE] [--epochs N]` | `bestModels/model_betaVAE_<data>_lat…_b…_ep….pt` + figures | from minutes to hours (1000 epochs by default) |
 | `python3 analysis.py [--vae PT] [--pod NPZ] [--data FILE]` | figures only (POD vs VAE modes, errors) | minutes |
 
-`pod.py` and `analysis.py` read the older layouts: Tensor, channel `U`, `UW`. The file is
-set in each script's CONFIG block, or with `--data`.
+All three read every layout through `rom.data.load_data`: the Alpha0 and 2-plates files,
+and the older Tensor / channel `U` / `UW` files. The file is set in each script's CONFIG
+block, or with `--data`. `beta_vae.py` seeds torch (`TORCH_SEED = 7`), so a run can be repeated.
 
 ### 2. Convergence — `studies/2_convergence/`
 

@@ -144,8 +144,8 @@ def assess_pod(pool, val, k, n_step=ASSESS_N_STEP, m_reps=ASSESS_M_REPS, draw_se
     with open(out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
     try:
-        import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(figsize=(6.5, 4))
+        from matplotlib.figure import Figure        # no pyplot: the backend of the caller is left alone
+        fig = Figure(figsize=(6.5, 4)); ax = fig.subplots()
         ax.errorbar([r["n"] for r in rows], [r["e_mean"] for r in rows], yerr=[r["e_std"] for r in rows],
                     marker="o", ms=3.5, lw=1.6, color="#2a78d6", capsize=2)
         for tol, ls in ((0.05, "--"), (0.02, ":")):

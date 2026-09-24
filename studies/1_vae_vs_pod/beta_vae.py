@@ -33,7 +33,8 @@ BATCH_SIZE = 32
 N_EPOCHS   = 1000
 LR         = 3e-4
 VAL_FRAC   = 0.1
-RNG_SEED   = 7
+RNG_SEED   = 7       # train/val split
+TORCH_SEED = 7       # network initialisation and batch order
 VAL_EVERY  = None    # None = auto (every ~10% of epochs)
 SAVE_MODEL = True    # save best checkpoint as .pt file
 # ═══════════════════════════════════════════════════════════
@@ -108,6 +109,7 @@ def main():
     tr_loader = DataLoader(TensorDataset(X_tr), batch_size=BATCH_SIZE, shuffle=True)
     va_loader = DataLoader(TensorDataset(X_va), batch_size=BATCH_SIZE, shuffle=False)
 
+    torch.manual_seed(TORCH_SEED)
     enc = Encoder(H, W, C, LATENT_DIM).to(DEVICE)
     dec = Decoder(H, W, C, LATENT_DIM).to(DEVICE)
     opt = torch.optim.Adam(list(enc.parameters()) + list(dec.parameters()), lr=LR)

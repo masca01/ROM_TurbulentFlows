@@ -9,7 +9,6 @@ Inputs:  model_betaVAE_*.pt   (from beta_vae.py)
 
 import os, sys, math
 import numpy as np
-import scipy.io as sio
 import scipy.signal as sig
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -17,6 +16,7 @@ import torch
 import torch.nn as nn
 
 from rom import paths
+from rom.data import load_data
 
 # ── Folder layout (relative to this script) ──────────────────
 _DATA_DIR   = paths.DATA
@@ -56,54 +56,8 @@ def pick_file(title, start_dir="", ftype="*"):
 
 # ─────────────────── Data loading ────────────────────────
 
-def _read_field(S, key, is_hdf5):
-    arr = np.array(S[key], dtype=np.float32)
-    if is_hdf5:
-        arr = arr.T
-    return arr
-
-
-def load_data(path, comp_idx=None):
-    """Load .mat file (v5 or v7.3/HDF5) → data [Nt, C, H, W] float32, comp_names."""
-    import h5py
-
-    fh = None
-    try:
-        S = sio.loadmat(path, simplify_cells=True)
-        is_hdf5 = False
-    except NotImplementedError:
-        fh = h5py.File(path, "r")
-        S = fh
-        is_hdf5 = True
-
-    try:
-        if "Tensor" in S:
-            T = _read_field(S, "Tensor", is_hdf5)
-            C, N1, N2, Nt = T.shape
-            data = T.transpose(3, 0, 1, 2)
-            names = {2: ["u", "v"], 3: ["u", "v", "w"]}.get(C, [f"c{i}" for i in range(C)])
-        elif "U" in S:
-            V = _read_field(S, "U", is_hdf5)
-            Nt, Nz, Nx, C_all = V.shape
-            if comp_idx is None:
-                comp_idx = [0, 2] if C_all == 3 else list(range(C_all))
-            V = V[:, :, :, comp_idx]
-            data = V.transpose(0, 3, 1, 2)
-            all_names = ["u", "v", "w"]
-            names = [all_names[i] for i in comp_idx]
-        elif "UW" in S:
-            V = _read_field(S, "UW", is_hdf5)
-            data = V.transpose(0, 3, 1, 2)
-            names = ["u", "w"]
-        else:
-            visible = [k for k in S.keys() if not k.startswith("#")]
-            raise ValueError(f"Unknown format. Fields: {visible}")
-    finally:
-        if fh is not None:
-            fh.close()
-
-    print(f"Loaded data: {data.shape}  comps={names}")
-    return data, names
+# load_data: rom.data.load_data (every layout: Tensor, U, UW, the 2-plates DataU/DataV
+# and the Alpha0 U/V files; before, this script had its own copy without the last two)
 
 
 # ─────────────────── Network (same as beta_vae.py) ───────
@@ -286,7 +240,7 @@ def fig_vae_modes(dec, latent_dim, Z, comp_names, H, W, n_modes, std_C, use_delt
     """Figure 2: beta-VAE modes (delta or direct)."""
     C = len(comp_names)
     latent_var = Z.var(axis=0)
-    order = np.argsort(latent_var)[::-1]
+    order = np.argsort(latent_var)[::-1].copy()   # copy: torch rejects negative strides
 
     n = min(n_modes, latent_dim)
     ncols = C + 1
@@ -333,7 +287,7 @@ def fig_correlations(Z, Vsvd, sing, latent_dim, beta):
         return np.abs(C)
 
     latent_var = Z.var(axis=0)
-    order = np.argsort(latent_var)[::-1]
+    order = np.argsort(latent_var)[::-1].copy()   # copy: torch rejects negative strides
     Z_ord = Z[:, order]
 
     n = min(latent_dim, Vsvd.shape[1])
@@ -364,7 +318,7 @@ def fig_error_vs_modes(pod_ranks, ek_pod_all, Z, dec, data_n, std_C, tr_idx, val
                         latent_dim, C, H, W):
     """Figure 4: normalized error (%) vs number of modes."""
     latent_var = Z.var(axis=0)
-    order = np.argsort(latent_var)[::-1]
+    order = np.argsort(latent_var)[::-1].copy()   # copy: torch rejects negative strides
 
     def compute_sse(idx_set, active_dims):
         SSE = 0.0; EN = 0.0

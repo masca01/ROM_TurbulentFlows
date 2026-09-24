@@ -1,5 +1,0 @@
-dataset,data_frac,run,n_real,n_aug,n_val,noise_level,latent,beta,best_val_loss,best_val_Ek,best_detR
-isotropic1024coarse_xz_y1.5708_256x256_Nt5024_UVW,0.0200,baseline,100,0,1005,0.1,4,0.005,0.238691,72.3751,0.974987
-isotropic1024coarse_xz_y1.5708_256x256_Nt5024_UVW,0.0200,augmented,100,500,1005,0.1,4,0.005,0.188073,79.6245,0.929082
-isotropic1024coarse_xz_y1.5708_256x256_Nt5024_UVW,0.0200,baseline,100,0,1005,0.05,4,0.005,0.238691,72.3751,0.974987
-isotropic1024coarse_xz_y1.5708_256x256_Nt5024_UVW,0.0200,augmented,100,500,1005,0.05,4,0.005,0.187947,79.5756,0.940123

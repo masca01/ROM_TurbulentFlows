@@ -1,4 +1,0 @@
-label,use_aug,n_train,n_real,n_aug,n_val,best_val_loss,best_val_Ek,best_detR
-gmm,False,900,900,0,100,0.456765,36.1505,0.883433
-gmm,False,900,900,0,100,0.428439,43.1098,0.948750
-gmm,True,1800,900,900,100,0.450543,37.4915,0.932036

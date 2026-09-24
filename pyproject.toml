@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rom-turbulentflows"
+version = "1.0.0"
+description = "beta-VAE reduced-order models of 2-D flat-plate wakes and POD-Galerkin data augmentation (MMAE 597)"
+authors = [{ name = "Valeri Mascarilla" }]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "torch",
+    "h5py",
+    "matplotlib",
+    "openpyxl",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+# Only the library is a package. The scripts in studies/ and tools/ are run as files.
+# Install with `pip install -e .` (editable): rom/paths.py locates DATA / bestModels /
+# convergence relative to this repository, so a non-editable install would point elsewhere.
+[tool.setuptools]
+packages = ["rom"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,5 +1,0 @@
-label,use_aug,n_train,n_real,n_aug,n_val,best_val_loss,best_val_Ek,best_detR
-joint,True,1800,900,900,100,0.413872,44.9128,0.945019
-joint,False,900,900,0,100,0.423536,43.7717,0.941101
-galerkin,True,1800,900,900,100,0.372454,50.3713,0.842898
-galerkin_ns,True,1800,900,900,100,0.381363,49.4391,0.886312

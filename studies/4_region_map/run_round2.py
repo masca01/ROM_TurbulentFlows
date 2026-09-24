@@ -35,10 +35,10 @@ N4 2.9 h).  Resumable: rows already in the CSV are skipped.
 Output: ../../convergence/experiments2_results.csv
 
 Usage:
-    python3 run_experiments2.py                 # everything
-    python3 run_experiments2.py --exp N1,N3     # a part (about 4 h)
-    python3 run_experiments2.py --plan          # what is left and the time estimate
-    python3 run_experiments2.py --exp N1 --subsets 1 --epochs 2 --csv /tmp/smoke.csv   # smoke test
+    python3 run_round2.py                 # everything
+    python3 run_round2.py --exp N1,N3     # a part (about 4 h)
+    python3 run_round2.py --plan          # what is left and the time estimate
+    python3 run_round2.py --exp N1 --subsets 1 --epochs 2 --csv /tmp/smoke.csv   # smoke test
 """
 import os, sys, csv, time, datetime, collections
 import numpy as np
@@ -179,7 +179,7 @@ def main():
         val_real = data[val_idx]
         steps_q = max(1, int(round(GEN_TIME / dt)))                # quality always over 10 convective times
         for (n, smode, sub), cs_ in groups.items():
-            # block subsets: identical draw and quality windows to run_region_map.py / run_experiments.py
+            # block subsets: identical draw and quality windows to run_region_map.py / run_round1.py
             seed = [DRAW_SEED, int(re_), n, sub] + ([] if smode == "blocks" else [555])
             rng = np.random.default_rng(seed)
             tr_idx = draw_subset(smode, pool_set, pool_idx, Nt, n, rng)

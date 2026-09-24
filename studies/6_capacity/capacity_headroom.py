@@ -19,7 +19,9 @@ of how many cells and how many screening decisions actually change.
 """
 import csv, os, statistics as st, collections
 
-CONV = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "convergence"))
+from rom import paths
+
+CONV = paths.RESULTS
 OUT = os.path.join(CONV, "headroom_corrected.csv")
 OUT_CELLS = os.path.join(CONV, "headroom_corrected_cells.csv")
 

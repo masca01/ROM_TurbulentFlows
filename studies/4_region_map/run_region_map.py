@@ -38,6 +38,7 @@ Usage:
 import os, sys, csv, time, datetime
 import numpy as np
 
+from rom import paths
 from rom import galerkin_data as gd             # data-identified model: fit_galerkin, make_step
 from rom import galerkin_ns as gns              # NS projection, grid_spacing
 from rom import vae                             # train(): same recipe as every study so far
@@ -49,9 +50,7 @@ from rom.augment import (n_aug_for, fidelity, fidelity_windows, synthetic_arm, G
 from rom.vae import EPOCHS, SEC_PER_SAMPLE
 from rom.results import append_row
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_DATA = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
-_CONV = os.path.normpath(os.path.join(_HERE, "..", "..", "convergence"))
+_CONV = paths.RESULTS
 
 # ============ CONFIG ============
 # Files, snapshot caps and latents: rom.data.DATASETS (Re50 latent 5, Re80 11, Re100 15).

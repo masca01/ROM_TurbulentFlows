@@ -37,10 +37,10 @@ Total: 27 real-only + 63 augmented trainings, about 12.5 hours. Run a part with 
 Output: ../../convergence/experiments_results.csv (resumable: finished rows are skipped).
 
 Usage:
-    python3 run_experiments.py                  # everything
-    python3 run_experiments.py --exp E1,E2,E3   # first night (about 7 h)
-    python3 run_experiments.py --exp E4,E5      # second night (about 6 h)
-    python3 run_experiments.py --plan           # what is left, nothing runs
+    python3 run_round1.py                  # everything
+    python3 run_round1.py --exp E1,E2,E3   # first night (about 7 h)
+    python3 run_round1.py --exp E4,E5      # second night (about 6 h)
+    python3 run_round1.py --plan           # what is left, nothing runs
 """
 import os, sys, csv, time, datetime, collections
 import numpy as np

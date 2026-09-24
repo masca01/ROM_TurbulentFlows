@@ -15,10 +15,11 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 
-# ── Folder layout ─────────────────────────────────────────────
-_HERE       = os.path.dirname(os.path.abspath(__file__))
-_DATA_DIR   = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
-_MODELS_DIR = os.path.normpath(os.path.join(_HERE, "..", "bestModels"))
+from rom import paths
+
+# ── Folder layout (rom/paths.py) ──────────────────────────────
+_DATA_DIR   = paths.DATA
+_MODELS_DIR = paths.MODELS
 
 # ══════════════════════════ CONFIG ══════════════════════════
 # Path to the saved .pt checkpoint (from beta_vae.py).

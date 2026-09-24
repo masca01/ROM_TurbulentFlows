@@ -46,10 +46,10 @@ from torch.utils.data import DataLoader, TensorDataset
 from rom import vae as bv
 from rom.data import load_data
 from rom import split as cs
+from rom import paths
 
-# ------------ Folder layout ------------
-_HERE     = os.path.dirname(os.path.abspath(__file__))
-_DATA_DIR = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
+# ------------ Folder layout (rom/paths.py) ------------
+_DATA_DIR = paths.DATA
 
 # ============ CONFIG ============
 # DATA_FILE and the snapshot cap can be overridden on the command line so the

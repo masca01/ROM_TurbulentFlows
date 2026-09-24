@@ -22,9 +22,9 @@ import numpy as np
 
 from rom.data import load_data
 from rom import split as cs
+from rom import paths
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_DATA = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
+_DATA = paths.DATA
 
 SPLIT = cs.check_mode(sys.argv[1] if len(sys.argv) > 1 else "random")
 VAL_FRAC = cs.val_frac(SPLIT)   # validation fraction of THIS split mode (0.10 or 0.025)

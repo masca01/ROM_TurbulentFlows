@@ -165,7 +165,7 @@ def fidelity_windows(tr_set, Nt, steps, rng):
 
 
 # ------------------------------- augmentation arms -------------------------------
-# (inline in run_experiments*.py, run_lowdata*.py; same operations and rng calls, in the same order)
+# (inline in run_experiments*.py = run_round1/2.py and run_lowdata*.py; same operations and rng calls, in the same order)
 
 def synthetic_arm(step, s, to_b, from_b, P, A, K, n, steps, rng,
                   kick=IC_NOISE, energy_tol=ENERGY_TOL, max_traj=MAX_TRAJ):
@@ -189,8 +189,8 @@ def real_arm(P, K, data, pool_idx, tr_idx, n, grng, project=True, cap=True):
     """n EXTRA real snapshots from the pool that the subset does not use.
     project=True  -> projected on the same K modes (real_proj: what a perfect reduced model gives)
     project=False -> full fields (real_full: the upper bound)
-    cap=True      -> take at most what the pool still holds (run_experiments2 / run_lowdata*);
-    cap=False     -> ask for exactly n (run_experiments.py: numpy raises when the pool is short).
+    cap=True      -> take at most what the pool still holds (run_round2.py / run_lowdata*);
+    cap=False     -> ask for exactly n (run_round1.py: numpy raises when the pool is short).
     Returns (aug, number taken)."""
     avail = np.setdiff1d(pool_idx, tr_idx)
     take = min(n, len(avail)) if cap else n

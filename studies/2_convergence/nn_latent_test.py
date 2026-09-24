@@ -32,10 +32,10 @@ from torch.utils.data import DataLoader, TensorDataset
 from rom import vae as bv
 from rom.data import load_data
 from rom import split as cs
+from rom import paths
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_DATA = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
-_CONV = os.path.normpath(os.path.join(_HERE, "..", "..", "convergence"))
+_DATA = paths.DATA
+_CONV = paths.RESULTS
 
 # ============ CONFIG ============
 SPLIT = "tail5"         # default split (first CLI arg overrides): "tail5" | "tail2.5" | "tail" | "random"

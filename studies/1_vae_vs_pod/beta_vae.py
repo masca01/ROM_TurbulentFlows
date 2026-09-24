@@ -9,14 +9,14 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 # network, loss, metrics and the loader live in rom (shared with every study)
+from rom import paths
 from rom.data import load_data
 from rom.vae import (DEVICE, Encoder, Decoder, compute_ek, compute_det_R,
                      vae_loss, val_loss)
 
-# ── Folder layout ──
-_HERE       = os.path.dirname(os.path.abspath(__file__))
-_DATA_DIR   = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
-_MODELS_DIR = os.path.normpath(os.path.join(_HERE, "..", "bestModels"))
+# ── Folder layout (rom/paths.py) ──
+_DATA_DIR   = paths.DATA
+_MODELS_DIR = paths.MODELS
 os.makedirs(_MODELS_DIR, exist_ok=True)
 
 # ══ CONFIG ══

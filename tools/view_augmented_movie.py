@@ -29,9 +29,10 @@ import scipy.io as sio
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-# ── Folder layout ──
-_HERE     = os.path.dirname(os.path.abspath(__file__))
-_AUG_DIR  = os.path.normpath(os.path.join(_HERE, "..", "DATA", "AUGMENTED"))
+from rom import paths
+
+# ── Folder layout (rom/paths.py) ──
+_AUG_DIR  = paths.AUGMENTED
 
 # ══ CONFIG ══════════════════════════════════════════════════════════════════
 AUG_FILE  = os.path.join(_AUG_DIR, "Data2PlatesGap1Re50_aug_galerkin_ns_5traj.mat")

@@ -16,10 +16,11 @@ import matplotlib.gridspec as gridspec
 import torch
 import torch.nn as nn
 
+from rom import paths
+
 # ── Folder layout (relative to this script) ──────────────────
-_HERE       = os.path.dirname(os.path.abspath(__file__))
-_DATA_DIR   = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
-_MODELS_DIR = os.path.normpath(os.path.join(_HERE, "..", "bestModels"))
+_DATA_DIR   = paths.DATA
+_MODELS_DIR = paths.MODELS
 
 # ══════════════════════════ CONFIG ══════════════════════════
 VAE_FILE  = "/Users/vmascarilla/Desktop/MMAE/597 - Special Topics/CODING/bestModels/model_betaVAE_isotropic1024coarse_xz_y3.1416_256x256_Nt5024_UVW_lat5_b8e-04_ep500.pt"

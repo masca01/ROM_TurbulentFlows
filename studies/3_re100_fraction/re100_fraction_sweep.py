@@ -40,15 +40,15 @@ Budget: ~3 min generation, then 500-epoch trainings on 900 / 1200 / 1800 / 2700 
 import os, sys, csv, time, datetime
 import numpy as np
 
+from rom import paths
 from rom import augment                       # summer generator settings, generate_pool(), n_aug_for()
 from rom import vae                            # train(): the recipe of every study
 from rom.data import load_data
 from rom.results import rewrite_with_row
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_DATA = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
-_AUG  = os.path.join(_DATA, "AUGMENTED")
-_CONV = os.path.normpath(os.path.join(_HERE, "..", "..", "convergence"))
+_DATA = paths.DATA
+_AUG  = paths.AUGMENTED
+_CONV = paths.RESULTS
 
 # ============ CONFIG (summer values; do not change to reproduce) ============
 # The summer generator settings (Re 100, dt 1, 30 / 25 modes, ridge 1e-6, horizon 20,

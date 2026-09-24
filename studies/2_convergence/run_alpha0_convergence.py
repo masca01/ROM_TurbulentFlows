@@ -34,8 +34,10 @@ sweeps first.
 """
 import os, sys, subprocess, time
 
-_HERE     = os.path.dirname(os.path.abspath(__file__))
-_DATA     = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
+from rom import paths
+
+_HERE     = os.path.dirname(os.path.abspath(__file__))     # the sibling scripts it launches
+_DATA     = paths.DATA
 
 # ============ CONFIG ============
 # SPLIT: how the 10% validation set is chosen (convergence_split.py):

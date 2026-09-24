@@ -11,10 +11,11 @@ import scipy.io as sio
 import scipy.linalg as la
 import matplotlib.pyplot as plt
 
-# ── Folder layout (relative to this script) ──────────────────
-_HERE       = os.path.dirname(os.path.abspath(__file__))
-_DATA_DIR   = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
-_MODELS_DIR = os.path.normpath(os.path.join(_HERE, "..", "bestModels"))
+from rom import paths
+
+# ── Folder layout (rom/paths.py) ─────────────────────────────
+_DATA_DIR   = paths.DATA
+_MODELS_DIR = paths.MODELS
 os.makedirs(_MODELS_DIR, exist_ok=True)
 
 # ══════════════════════════ CONFIG ══════════════════════════

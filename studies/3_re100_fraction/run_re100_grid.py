@@ -43,8 +43,7 @@ from rom.pod import assess_pod, pod_val_error
 from rom.split import draw_pool_subset, RE100_DRAW_SEED
 from rom.results import rewrite_with_row
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_CONV = os.path.normpath(os.path.join(_HERE, "..", "..", "convergence"))
+_CONV = paths.RESULTS
 
 # ============ CONFIG ============
 GENERATOR  = "galerkin_ns"                    # "galerkin_ns" (NS equations, random subset) | "galerkin" (data regression, blocks subset)

@@ -18,7 +18,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from pod_augment_galerkin_ns import load_data
+from rom.data import load_data
 
 # ============ CONFIG ============
 DATA_FILE = "/Users/vmascarilla/Desktop/MMAE/597 - Special Topics/CODING/DATA/2PlatesGap/Data2PlatesGap1Re50.mat"

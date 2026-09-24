@@ -24,11 +24,16 @@ Usage:
 import os, sys, csv, time, datetime, collections
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import run_region_map as rm
-import run_lowdata as L
-import pod_augment_galerkin_ns as pns
-import re100_fraction_sweep as rs
+from rom import paths
+from rom import vae
+from rom.data import load
+from rom.split import split_indices, draw_subset, SPLIT_SEED, DRAW_SEED
+from rom.pod import subset_pod, ceiling_and_project, TRUNCS as ALL_TRUNCS, k_of
+from rom.galerkin_ns import build_ops, model_at
+from rom.augment import (n_aug_for, fidelity, fidelity_windows, synthetic_arm, jitter_arm, real_arm,
+                         GEN_TIME, SUBSTEPS, IC_NOISE, ENERGY_TOL, MAX_TRAJ)
+from rom.vae import EPOCHS, SEC_PER_SAMPLE
+from rom.results import append_row, now, LOWDATA_FIELDS
 
 # ============ CONFIG ============
 DATASET   = "Re50"
@@ -40,11 +45,11 @@ TRUNCS    = ["K10", "K15"]
 ARMS      = ["galerkin_ns", "jitter", "real_proj"]
 N_SUBSETS = 8
 # ================================
-CSV_OUT = L.TRAIN_CSV
+CSV_OUT = os.path.join(paths.RESULTS, "lowdata_results.csv")     # the file of run_lowdata.py stage B
 
 
 def _args(argv):
-    o = {"plan": False, "subsets": N_SUBSETS, "epochs": rm.EPOCHS}
+    o = {"plan": False, "subsets": N_SUBSETS, "epochs": EPOCHS}
     it = iter(argv)
     for a in it:
         if a == "--plan": o["plan"] = True
@@ -74,15 +79,14 @@ def done_sets():
 
 def main():
     o = _args(sys.argv[1:])
-    rs.EPOCHS = o["epochs"]
     base_done, aug_done = done_sets()
-    n_aug = rs.n_aug_for(FRACTION, N_REAL)
+    n_aug = n_aug_for(FRACTION, N_REAL)
 
     todo_base = [s for s in range(o["subsets"]) if str(s) not in base_done]
     todo_aug = [(s, t, g) for s in range(o["subsets"]) for t in TRUNCS for g in ARMS
                 if (str(s), t, g, str(round(FRACTION, 4))) not in aug_done]
     samples = len(todo_base) * N_REAL + len(todo_aug) * (N_REAL + n_aug)
-    hours = samples * rm.SEC_PER_SAMPLE * o["epochs"] / 500 / 3600
+    hours = samples * SEC_PER_SAMPLE * o["epochs"] / 500 / 3600
     print(f"[sub]  {DATASET}, {N_REAL} real, latent {LATENT}, fraction {FRACTION} "
           f"({n_aug} added snapshots), truncations {', '.join(TRUNCS)}")
     print(f"[sub]  subsets 0..{o['subsets'] - 1}: {len(todo_base)} real-only + {len(todo_aug)} augmented "
@@ -93,47 +97,47 @@ def main():
         return
 
     T0 = time.time()
-    data, re_, dt, path = rm.load(DATASET)
+    data, re_, dt, path = load(DATASET)
     Nt = len(data)
-    val_idx, pool_idx, _ = rm.cs.split_indices(Nt, None, "random", rm.SPLIT_SEED)
+    val_idx, pool_idx, _ = split_indices(Nt, None, "random", SPLIT_SEED)
     pool_set = set(int(i) for i in pool_idx)
     val_real = data[val_idx]
-    steps = max(1, int(round(rm.GEN_TIME / dt)))
-    rs.LATENT = LATENT
+    steps = max(1, int(round(GEN_TIME / dt)))
 
     for sub in range(o["subsets"]):
-        rng = np.random.default_rng([rm.DRAW_SEED, int(re_), N_REAL, sub])
-        tr_idx = L.draw_subset(SAMPLING, pool_set, pool_idx, Nt, N_REAL, rng)
+        rng = np.random.default_rng([DRAW_SEED, int(re_), N_REAL, sub])
+        tr_idx = draw_subset(SAMPLING, pool_set, pool_idx, Nt, N_REAL, rng)
         train_real = data[tr_idx]
-        win = rm.fidelity_windows(set(int(i) for i in tr_idx), Nt, steps, rng)
-        P = rm.subset_pod(train_real)
+        win = fidelity_windows(set(int(i) for i in tr_idx), Nt, steps, rng)
+        P = subset_pod(train_real)
         windows = [data[t:t + steps + 1] for t in win]
         print(f"\n[sub]  ===== subset {sub}: {len(win)} quality windows =====", flush=True)
 
         if str(sub) not in base_done:
-            ek, detR, _, wall = rs.train(train_real, np.empty((0,) + train_real.shape[1:], np.float32),
-                                         val_real, tag=f"{DATASET} n={N_REAL} s{sub} real only")
+            ek, detR, _, wall = vae.train(train_real, np.empty((0,) + train_real.shape[1:], np.float32),
+                                          val_real, tag=f"{DATASET} n={N_REAL} s{sub} real only",
+                                          latent=LATENT, epochs=o["epochs"])
             base_done[str(sub)] = float(ek)
-            L.append(CSV_OUT, L.B_FIELDS, dict(
-                date=L.now(), dataset=DATASET, n_real=N_REAL, sampling=SAMPLING, subset=sub, kind="baseline",
+            append_row(CSV_OUT, LOWDATA_FIELDS, dict(
+                date=now(), dataset=DATASET, n_real=N_REAL, sampling=SAMPLING, subset=sub, kind="baseline",
                 latent=LATENT, trunc="", K="", n_train=N_REAL, epochs=o["epochs"], Ek=round(float(ek), 4),
                 detR=round(float(detR), 6), status="ok", wall_s=round(wall)))
             print(f"[sub]  real-only Ek {ek:.2f}%", flush=True)
         base = base_done[str(sub)]
 
         for tname in TRUNCS:
-            trunc = [t for t in L.TRUNCS if t[0] == tname][0]
-            K = L.k_of(P, trunc, N_REAL)
-            ceiling, win_A = rm.ceiling_and_project(P, K, val_real, windows)
+            trunc = [t for t in ALL_TRUNCS if t[0] == tname][0]
+            K = k_of(P, trunc, N_REAL)
+            ceiling, win_A = ceiling_and_project(P, K, val_real, windows)
             A = np.asarray(P["A"][:, :K], dtype=np.float64)
             info = dict(dataset=DATASET, n_real=N_REAL, sampling=SAMPLING, subset=sub, latent=LATENT,
                         trunc=tname, K=K, energy_K_pct=round(100 * P["e_cum"][K - 1], 3),
                         pod_ceiling_Ek=round(ceiling, 3))
             qerr = None
             if "galerkin_ns" in ARMS:
-                l, q, kap = L.build_ops(P, K, re_, path)
-                step, s, to_b, from_b = L.model_at(l, q, kap, A, K, dt)
-                qerr = rm.fidelity(step, to_b, from_b, win_A, steps)[0] if win_A else None
+                l, q, kap = build_ops(P, K, re_, path)
+                step, s, to_b, from_b = model_at(l, q, kap, A, K, dt, SUBSTEPS)
+                qerr = fidelity(step, to_b, from_b, win_A, steps)[0] if win_A else None
                 del l, q
                 print(f"[sub]  {tname} (K={K}): ceiling {ceiling:.1f}%, ROM error "
                       f"{'-' if qerr is None else f'{qerr:.3f}'}", flush=True)
@@ -143,35 +147,27 @@ def main():
                     continue
                 try:
                     if gen == "galerkin_ns":
-                        B_new, _ = pns.integrate_trajectories(
-                            step, s, to_b(A), n_aug, steps, rm.IC_NOISE, rm.ENERGY_TOL, rm.MAX_TRAJ,
-                            np.random.default_rng([rm.DRAW_SEED, int(re_), N_REAL, sub, K]))
-                        aug = pns.reconstruct(P["x_mean"], P["Xc"], P["Wp"][:, :K], from_b(B_new), P["shape"])
+                        aug, _ = synthetic_arm(step, s, to_b, from_b, P, A, K, n_aug, steps,
+                                               np.random.default_rng([DRAW_SEED, int(re_), N_REAL, sub, K]),
+                                               kick=IC_NOISE, energy_tol=ENERGY_TOL, max_traj=MAX_TRAJ)
                     elif gen == "jitter":
-                        grng = np.random.default_rng([rm.DRAW_SEED, int(re_), N_REAL, sub, K, 7777])
-                        idx = grng.integers(0, len(A), size=n_aug)
-                        A_new = A[idx] + rm.IC_NOISE * A.std(axis=0)[None, :] * grng.standard_normal((n_aug, K))
-                        aug = pns.reconstruct(P["x_mean"], P["Xc"], P["Wp"][:, :K], A_new, P["shape"])
+                        grng = np.random.default_rng([DRAW_SEED, int(re_), N_REAL, sub, K, 7777])
+                        aug = jitter_arm(P, A, K, n_aug, grng, kick=IC_NOISE)
                     else:
-                        grng = np.random.default_rng([rm.DRAW_SEED, int(re_), N_REAL, sub, K, 7777])
-                        avail = np.setdiff1d(pool_idx, tr_idx)
-                        take = min(n_aug, len(avail))
-                        extra = np.sort(grng.choice(avail, size=take, replace=False))
-                        U = (P["Xc"].T @ P["Wp"][:, :K]).astype(np.float32)
-                        A_x = (data[extra].reshape(take, -1) - P["x_mean"]) @ U
-                        del U
-                        aug = pns.reconstruct(P["x_mean"], P["Xc"], P["Wp"][:, :K], A_x, P["shape"])
+                        grng = np.random.default_rng([DRAW_SEED, int(re_), N_REAL, sub, K, 7777])
+                        aug, _ = real_arm(P, K, data, pool_idx, tr_idx, n_aug, grng, project=True, cap=True)
                 except Exception as err:
                     msg = str(err).splitlines()[0][:160]
                     print(f"[sub]  !! {gen} {tname}: generation failed ({msg})", flush=True)
-                    L.append(CSV_OUT, L.B_FIELDS, dict(info, date=L.now(), kind="gen_failed", generator=gen,
+                    append_row(CSV_OUT, LOWDATA_FIELDS, dict(info, date=now(), kind="gen_failed", generator=gen,
                                                        fraction=round(FRACTION, 4), epochs=o["epochs"],
                                                        status=f"failed: {msg}"))
                     continue
-                ek, detR, _, wall = rs.train(train_real, aug, val_real,
-                                             tag=f"{DATASET} n={N_REAL} s{sub} {gen} {tname} f={FRACTION}")
-                L.append(CSV_OUT, L.B_FIELDS, dict(
-                    info, date=L.now(), kind="aug", generator=gen, fraction=round(FRACTION, 4),
+                ek, detR, _, wall = vae.train(train_real, aug, val_real,
+                                              tag=f"{DATASET} n={N_REAL} s{sub} {gen} {tname} f={FRACTION}",
+                                              latent=LATENT, epochs=o["epochs"])
+                append_row(CSV_OUT, LOWDATA_FIELDS, dict(
+                    info, date=now(), kind="aug", generator=gen, fraction=round(FRACTION, 4),
                     epochs=o["epochs"], n_aug=len(aug), n_train=N_REAL + len(aug), baseline_Ek=round(base, 4),
                     headroom=round(ceiling - base, 3),
                     quality_err=round(qerr, 5) if (qerr is not None and gen == "galerkin_ns") else "",

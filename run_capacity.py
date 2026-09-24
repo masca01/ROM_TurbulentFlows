@@ -29,24 +29,25 @@ Usage:
 import os, sys, csv, time, datetime
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import run_region_map as rm
-import re100_fraction_sweep as rs
+from rom import paths
+from rom import vae
+from rom.data import load
+from rom.split import split_indices, SPLIT_SEED
+from rom.pod import subset_pod, k_for, ceiling_and_project
+from rom.vae import EPOCHS, SEC_PER_SAMPLE
 
 # ============ CONFIG ============
 DATASETS = ["Re100"]
 LATENTS  = [5, 15, 25]
-FILES    = dict(rm.DATASETS, Re60=("Alpha0/dataRe60Alpha0_2.mat", 1500, 7),
-                             Re70=("Alpha0/dataRe70Alpha0_2.mat", 1500, 9))
-CSV_OUT  = os.path.join(rm._CONV, "capacity_ceilings.csv")
+CSV_OUT  = os.path.join(paths.RESULTS, "capacity_ceilings.csv")
 FIELDS   = ["date", "dataset", "Re", "latent", "n_train", "n_val", "epochs", "Ek", "e", "detR",
             "pod_ceiling_pool", "wall_s", "note"]
 # ================================
-rm.DATASETS = FILES
+# files and caps of Re50..Re100: rom.data.DATASETS
 
 
 def _args(argv):
-    o = {"plan": False, "datasets": DATASETS, "latents": LATENTS, "epochs": rm.EPOCHS, "csv": CSV_OUT}
+    o = {"plan": False, "datasets": DATASETS, "latents": LATENTS, "epochs": EPOCHS, "csv": CSV_OUT}
     it = iter(argv)
     for a in it:
         if a == "--plan": o["plan"] = True
@@ -66,13 +67,12 @@ def done(path):
 
 def main():
     o = _args(sys.argv[1:])
-    rs.EPOCHS = o["epochs"]
     have = done(o["csv"])
     todo = [(ds, lat) for ds in o["datasets"] for lat in o["latents"]
             if (ds, str(lat), str(o["epochs"])) not in have]
     # pool size: 90% of the record (the random split of every study)
     pool = {"Re100": 900}.get(o["datasets"][0], 1350)
-    hours = len(todo) * pool * rm.SEC_PER_SAMPLE * o["epochs"] / 500 / 3600
+    hours = len(todo) * pool * SEC_PER_SAMPLE * o["epochs"] / 500 / 3600
     print(f"[cap]  {len(todo)} trainings on the full pool (~{pool} snapshots each), "
           f"about {hours:.1f} h  ->  {o['csv']}", flush=True)
     for ds, lat in todo:
@@ -85,20 +85,19 @@ def main():
     for ds, lat in todo:
         by_ds.setdefault(ds, []).append(lat)
     for ds, lats in by_ds.items():
-        data, re_, dt, path = rm.load(ds)
+        data, re_, dt, path = load(ds)
         Nt = len(data)
-        val_idx, pool_idx, _ = rm.cs.split_indices(Nt, None, "random", rm.SPLIT_SEED)
+        val_idx, pool_idx, _ = split_indices(Nt, None, "random", SPLIT_SEED)
         train_real, val_real = data[pool_idx], data[val_idx]
-        P = rm.subset_pod(train_real)                         # POD ceiling of the whole pool, for context
-        K = rm.k_for(P, 0.99)
-        ceiling, _ = rm.ceiling_and_project(P, K, val_real, [])
+        P = subset_pod(train_real)                         # POD ceiling of the whole pool, for context
+        K = k_for(P, 0.99)
+        ceiling, _ = ceiling_and_project(P, K, val_real, [])
         print(f"[cap]  {ds}: pool {len(train_real)} snapshots, validation {len(val_real)}, "
               f"POD ceiling of the pool at 99% energy ({K} modes) = {ceiling:.2f}%", flush=True)
         del P
         for lat in lats:
-            rs.LATENT = lat
-            ek, detR, _, wall = rs.train(train_real, np.empty((0,) + train_real.shape[1:], np.float32),
-                                         val_real, tag=f"{ds} full pool latent {lat}")
+            ek, detR, _, wall = vae.train(train_real, np.empty((0,) + train_real.shape[1:], np.float32),
+                                          val_real, tag=f"{ds} full pool latent {lat}", latent=lat, epochs=o["epochs"])
             with open(o["csv"], "a", newline="") as f:
                 w = csv.DictWriter(f, fieldnames=FIELDS)
                 if f.tell() == 0: w.writeheader()

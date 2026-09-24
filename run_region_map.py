@@ -38,45 +38,32 @@ Usage:
 import os, sys, csv, time, datetime
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import pod_augment_galerkin as pg              # data-identified model: fit_galerkin, make_step
-import pod_augment_galerkin_ns as pns          # NS projection, compute_pod, reconstruct, grid_spacing
-import re100_fraction_sweep as rs              # train(): same recipe as every study so far
-import convergence_split as cs
+from rom import galerkin_data as gd             # data-identified model: fit_galerkin, make_step
+from rom import galerkin_ns as gns              # NS projection, grid_spacing
+from rom import vae                             # train(): same recipe as every study so far
+from rom.data import DATASETS as REGISTRY, load
+from rom.split import split_indices, draw_blocks, SPLIT_SEED, DRAW_SEED, BLOCK
+from rom.pod import subset_pod, k_for, ceiling_and_project
+from rom.augment import (n_aug_for, fidelity, fidelity_windows, synthetic_arm, GENERATORS, GEN_TIME,
+                         SUBSTEPS, IC_NOISE, ENERGY_TOL, RIDGE, MAX_TRAJ)
+from rom.vae import EPOCHS, SEC_PER_SAMPLE
+from rom.results import append_row
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _DATA = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
 _CONV = os.path.normpath(os.path.join(_HERE, "..", "..", "convergence"))
 
 # ============ CONFIG ============
-DATASETS = {                    # name: (file, snapshot cap, latent of the convergence study)
-    "Re50":  ("Alpha0/dataRe50Alpha0_2.mat",          1500, 5),
-    "Re80":  ("Alpha0/dataRe80Alpha0_2.mat",          1500, 11),
-    "Re100": ("2PlatesGap/Data2PlatesGap1Re100.mat",  None, 15),
-}
+# Files, snapshot caps and latents: rom.data.DATASETS (Re50 latent 5, Re80 11, Re100 15).
+# Shared with every later study and imported above: split seed 7, subset seed 2026, blocks of
+# 10 (rom.split); generators galerkin / galerkin_ns, 10 convective times per trajectory,
+# 20 RK4 sub-steps, IC kick 0.05, energy band 5 %, ridge 1e-6, 20000 trajectories,
+# 20 quality windows clipped at 2 (rom.augment); 500 epochs, ~1.3 s per snapshot (rom.vae).
+DATASETS    = ["Re50", "Re80", "Re100"]
 N_REAL      = [100, 250]
 N_SUBSETS   = 3
-BLOCK       = 10                 # consecutive snapshots per block (the data-identified fit needs them)
 MODE_LEVELS = [0.95, 0.99]       # K = modes holding this share of the subset's energy
-GENERATORS  = ["galerkin", "galerkin_ns"]
 FRACTIONS   = [0.5]              # synthetic fraction of the training set
-SPLIT_SEED  = 7
-DRAW_SEED   = 2026
-
-# generator settings (as in the grids); horizon in CONVECTIVE time so datasets with
-# different snapshot spacing (dt 0.2 vs 1) integrate the same physical time
-GEN_TIME    = 10.0               # convective time units per synthetic trajectory
-SUBSTEPS    = 20
-IC_NOISE    = 0.05
-ENERGY_TOL  = 0.05
-RIDGE       = 1e-6
-MAX_TRAJ    = 20000
-# fidelity: held-out real windows of GEN_TIME, started from the true projected state
-FID_WINDOWS = 20
-FID_CLIP    = 2.0                # a window's relative error is clipped at 200 % (blow-ups)
-
-EPOCHS      = 500
-SEC_PER_SAMPLE = 1.3             # measured: 500 epochs cost ~1.3 s per training snapshot
 CSV_OUT     = os.path.join(_CONV, "region_map_results.csv")
 CSV_GEN     = os.path.join(_CONV, "region_map_generators.csv")
 # ================================
@@ -102,133 +89,31 @@ def _args(argv):
     return o
 
 
-# ------------------------------ data ------------------------------
-
-def load(name):
-    """[Nt, 2, H, W] float32, Re, dt, path. Reads only the first `cap` snapshots of the big
-    Alpha0 files straight from disk (the generic loader reads all 5000 first)."""
-    fn, cap, _ = DATASETS[name]
-    path = os.path.join(_DATA, fn)
-    import h5py
-    with h5py.File(path, "r") as f:
-        re_ = float(np.array(f["Re"]).ravel()[0]) if "Re" in f else float(name.replace("Re", ""))
-        dt = float(np.array(f["dt"]).ravel()[0]) if "dt" in f else 1.0   # old 2-plates files: 1 convective time
-        if "U" in f and "V" in f:
-            nt, nx, ny = f["U"].shape
-            nt = nt if cap is None else min(nt, cap)
-            data = np.empty((nt, 2, ny, nx), dtype=np.float32)     # filled one component at a time
-            for c, comp in enumerate(("U", "V")):
-                for t0 in range(0, nt, 250):                      # chunks keep the float64 read small
-                    data[t0:t0 + 250, c] = np.transpose(f[comp][t0:min(t0 + 250, nt)], (0, 2, 1))
-    if "data" not in locals():
-        data, _ = pns.load_data(path, None, 1, cap)
-    print(f"[load]  {name}: {data.shape}, Re {re_:g}, dt {dt:g}", flush=True)
-    return data, re_, dt, path
-
-
-def draw_blocks(pool_set, Nt, n_real, rng):
-    """n_real record indices made of non-overlapping blocks of BLOCK consecutive snapshots,
-    every block entirely inside the training pool."""
-    starts = [t for t in range(Nt - BLOCK + 1) if all((t + j) in pool_set for j in range(BLOCK))]
-    rng.shuffle(starts)
-    taken, chosen = set(), []
-    for t in starts:
-        blk = range(t, t + BLOCK)
-        if taken.isdisjoint(blk):
-            chosen.append(t); taken.update(blk)
-        if len(chosen) * BLOCK >= n_real:
-            break
-    if len(chosen) * BLOCK < n_real:
-        raise RuntimeError(f"cannot fit {n_real // BLOCK} blocks of {BLOCK} in the pool")
-    return np.array(sorted(i for t in chosen for i in range(t, t + BLOCK)))[:n_real]
-
-
 # ------------------------------ reduced models ------------------------------
-
-def subset_pod(train_real):
-    x_mean, Xc, Wp, S, A, shape = pns.compute_pod(train_real)
-    e_cum = np.cumsum(S ** 2) / (S ** 2).sum()
-    return dict(x_mean=x_mean, Xc=Xc, Wp=Wp, S=S, A=A, shape=shape, e_cum=e_cum)
-
-
-def k_for(P, level):
-    return int(min(np.searchsorted(P["e_cum"], level) + 1, P["A"].shape[1]))
-
-
-def ceiling_and_project(P, K, val_real, windows_data):
-    """POD ceiling of the validation set with K modes, and K-mode coefficients of the
-    fidelity windows (same centring as the network: the subset's mean)."""
-    U = (P["Xc"].T @ P["Wp"][:, :K]).astype(np.float32)                 # D x K, orthonormal
-    Xv = val_real.reshape(len(val_real), -1) - P["x_mean"]
-    Pv = (Xv @ U) @ U.T
-    ceiling = 100.0 * (1.0 - float(((Xv - Pv) ** 2).sum() / (Xv ** 2).sum()))
-    del Pv, Xv
-    win_A = [((w.reshape(len(w), -1) - P["x_mean"]) @ U).astype(np.float64) for w in windows_data]
-    del U
-    return ceiling, win_A
-
 
 def build_model(gen, P, K, tr_idx, re_, dt, path):
     """Returns (step, s, to_b, from_b, R2) for either generator.
     to_b: vector-unit POD coefficients -> the model's standardized state b; from_b: back."""
     A = np.asarray(P["A"][:, :K], dtype=np.float64)
     if gen == "galerkin":
-        beta, s, R2, _ = pg.fit_galerkin(A, tr_idx, dt, RIDGE)
-        step = pg.make_step(beta, "ode", dt, SUBSTEPS)
+        beta, s, R2, _ = gd.fit_galerkin(A, tr_idx, dt, RIDGE)
+        step = gd.make_step(beta, "ode", dt, SUBSTEPS)
         return step, s, (lambda a: a / s), (lambda b: b * s), R2
     C, H, W = P["shape"]
-    dx, dy = pns.grid_spacing(path); kappa = np.sqrt(dx * dy)
+    dx, dy = gns.grid_spacing(path); kappa = np.sqrt(dx * dy)
     U = (P["Xc"].T @ P["Wp"][:, :K]).astype(np.float64)
     Pu = np.empty((K + 1, H, W)); Pv = np.empty((K + 1, H, W))
     mean_f = P["x_mean"].astype(np.float64).reshape(C, H, W)
     Pu[0], Pv[0] = mean_f[0], mean_f[1]
     modes = (U / kappa).T.reshape(K, C, H, W); Pu[1:], Pv[1:] = modes[:, 0], modes[:, 1]
     del U, modes
-    l, q = pns.galerkin_operators_ns(Pu, Pv, dx, dy, re_)
+    l, q = gns.galerkin_operators_ns(Pu, Pv, dx, dy, re_)
     del Pu, Pv
     A_phys = A * kappa
-    R2 = pns.derivative_R2(l, q, A_phys, tr_idx, dt)
+    R2 = gns.derivative_R2(l, q, A_phys, tr_idx, dt)
     s = A_phys.std(axis=0); s = np.where(s < 1e-14, 1.0, s)
-    step = pns.make_step_ns(l, q, s, dt, SUBSTEPS)
+    step = gns.make_step_ns(l, q, s, dt, SUBSTEPS)
     return step, s, (lambda a: a * kappa / s), (lambda b: b * s / kappa), R2
-
-
-def fidelity(step, to_b, from_b, win_A, steps):
-    """Relative K-mode error of the model over held-out real windows, started from the
-    true projected state: sum |a_pred - a_true|^2 / sum |a_true|^2 in POD-coefficient units
-    (energy-weighted, comparable between generators), per window, clipped at FID_CLIP."""
-    errs, blown = [], 0
-    for Aw in win_A:
-        b = to_b(Aw[0]); num = den = 0.0; ok = True
-        cap = 50.0 * np.abs(to_b(Aw)).max()
-        for t in range(1, steps + 1):
-            with np.errstate(over="ignore", invalid="ignore"):
-                b = step(b)
-            if not np.all(np.isfinite(b)) or np.abs(b).max() > cap:
-                ok = False; break
-            a_pred = from_b(b)
-            num += float(((a_pred - Aw[t]) ** 2).sum()); den += float((Aw[t] ** 2).sum())
-        if not ok:
-            blown += 1; errs.append(FID_CLIP)
-        else:
-            errs.append(min(num / max(den, 1e-30), FID_CLIP))
-    return float(np.mean(errs)), blown / max(len(win_A), 1)
-
-
-def fidelity_windows(tr_set, Nt, steps, rng):
-    """Up to FID_WINDOWS non-overlapping runs of steps+1 consecutive snapshots that contain
-    no training snapshot. They may include validation snapshots: fidelity is a diagnostic of
-    the generator and is never used to train or select the network, so nothing leaks."""
-    L = steps + 1
-    ok = [t for t in range(Nt - L + 1) if all((t + j) not in tr_set for j in range(L))]
-    rng.shuffle(ok)
-    taken, chosen = set(), []
-    for t in ok:
-        if taken.isdisjoint(range(t, t + L)):
-            chosen.append(t); taken.update(range(t, t + L))
-        if len(chosen) == FID_WINDOWS:
-            break
-    return sorted(chosen)
 
 
 # ------------------------------ bookkeeping ------------------------------
@@ -251,12 +136,7 @@ def load_done(path):
 
 
 def append(path, row):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    new = not os.path.exists(path)
-    with open(path, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS)
-        if new: w.writeheader()
-        w.writerow({k: row.get(k, "") for k in FIELDS})
+    append_row(path, FIELDS, row, makedirs=True)
 
 
 def now():
@@ -267,7 +147,6 @@ def now():
 
 def main():
     o = _args(sys.argv[1:])
-    rs.EPOCHS = o["epochs"]
     out = CSV_OUT if o["train"] else CSV_GEN
     base_done, done = load_done(out)
 
@@ -282,7 +161,7 @@ def main():
                     for gen in GENERATORS:
                         for f in FRACTIONS:
                             if (ds, str(n), str(sub), "aug", gen, str(lv), str(f)) not in done:
-                                n_aug += 1; samples += n + rs.n_aug_for(f, n)
+                                n_aug += 1; samples += n + n_aug_for(f, n)
     hours = samples * SEC_PER_SAMPLE * o["epochs"] / 500 / 3600
     print(f"[plan]  datasets {o['datasets']}, n {o['n']}, {o['subsets']} subsets, modes {MODE_LEVELS}, "
           f"generators {GENERATORS}, fractions {FRACTIONS}, {o['epochs']} epochs")
@@ -294,11 +173,10 @@ def main():
 
     T0 = time.time()
     for ds in o["datasets"]:
-        _, _, latent = DATASETS[ds]
-        rs.LATENT = latent
+        _, _, latent = REGISTRY[ds]
         data, re_, dt, path = load(ds)
         Nt = len(data)
-        val_idx, pool_idx, n_val = cs.split_indices(Nt, None, "random", SPLIT_SEED)
+        val_idx, pool_idx, n_val = split_indices(Nt, None, "random", SPLIT_SEED)
         pool_set = set(int(i) for i in pool_idx)
         val_real = data[val_idx]
         steps = max(1, int(round(GEN_TIME / dt)))
@@ -318,8 +196,8 @@ def main():
 
                 # real-only baseline
                 if need_base and o["train"]:
-                    ek, detR, _, wall = rs.train(train_real, np.empty((0,) + train_real.shape[1:], np.float32), val_real,
-                                                 tag=f"{ds} n={n} s{sub} real")
+                    ek, detR, _, wall = vae.train(train_real, np.empty((0,) + train_real.shape[1:], np.float32), val_real,
+                                                  tag=f"{ds} n={n} s{sub} real", latent=latent, epochs=o["epochs"])
                     base_done[(ds, str(n), str(sub))] = float(ek)
                     append(out, dict(common, date=now(), kind="baseline", fraction=0, n_aug=0, n_train=n, Ek=round(float(ek), 4),
                                      e=round(1 - float(ek) / 100, 6), detR=round(float(detR), 6), status="ok", wall_s=round(wall)))
@@ -350,12 +228,12 @@ def main():
                             step, s, to_b, from_b, R2 = build_model(gen, P, K, tr_idx, re_, dt, path)
                             ferr, fblow = fidelity(step, to_b, from_b, win_A, steps)
                             row0.update(fid_err=round(ferr, 5), fid_blowup_frac=round(fblow, 3), gen_R2_min=round(float(np.min(R2)), 4))
-                            n_max = max(rs.n_aug_for(f, n) for f in fr)
-                            B_real = to_b(np.asarray(P["A"][:, :K], dtype=np.float64))
-                            integ = pg.integrate_trajectories if gen == "galerkin" else pns.integrate_trajectories
-                            B_new, st = integ(step, s, B_real, n_max, steps, IC_NOISE, ENERGY_TOL, MAX_TRAJ,
-                                              np.random.default_rng([DRAW_SEED, int(re_), n, sub, K, GENERATORS.index(gen)]))
-                            aug = pns.reconstruct(P["x_mean"], P["Xc"], P["Wp"][:, :K], from_b(B_new), P["shape"])
+                            n_max = max(n_aug_for(f, n) for f in fr)
+                            # (the two integrate_trajectories of the old generators were identical copies)
+                            aug, st = synthetic_arm(step, s, to_b, from_b, P, np.asarray(P["A"][:, :K], dtype=np.float64),
+                                                    K, n_max, steps,
+                                                    np.random.default_rng([DRAW_SEED, int(re_), n, sub, K, GENERATORS.index(gen)]),
+                                                    kick=IC_NOISE, energy_tol=ENERGY_TOL, max_traj=MAX_TRAJ)
                             row0.update(gen_keep_frac=round(st["keep_frac"], 4), gen_n_traj=st["n_traj"], gen_seconds=round(time.time() - t0))
                             print(f"[map]  {gen:11s} K={K}: fidelity error {ferr:.3f} (blow-ups {fblow:.0%}), "
                                   f"{n_max} synthetic from {st['n_traj']} trajectories, {100 * st['keep_frac']:.0f}% kept "
@@ -369,13 +247,14 @@ def main():
                                 done.add((ds, str(n), str(sub), "aug", gen, str(lv), str(f)))
                             continue
                         for f in fr:
-                            na = rs.n_aug_for(f, n)
+                            na = n_aug_for(f, n)
                             row = dict(row0, date=now(), kind="aug", fraction=f, n_aug=na, n_train=n + na,
                                        baseline_Ek=round(base_ek, 4) if base_ek is not None else "")
                             if base_ek is not None:
                                 row["headroom"] = round(ceiling - base_ek, 3)
                             if o["train"]:
-                                ek, detR, _, wall = rs.train(train_real, aug[:na], val_real, tag=f"{ds} n={n} s{sub} {gen} K={K} f={f}")
+                                ek, detR, _, wall = vae.train(train_real, aug[:na], val_real, tag=f"{ds} n={n} s{sub} {gen} K={K} f={f}",
+                                                              latent=latent, epochs=o["epochs"])
                                 row.update(Ek=round(float(ek), 4), e=round(1 - float(ek) / 100, 6), detR=round(float(detR), 6),
                                            status="ok", wall_s=round(wall),
                                            gain=round(float(ek) - base_ek, 3) if base_ek is not None else "")

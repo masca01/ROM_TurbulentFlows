@@ -40,41 +40,43 @@ Usage:
 import os, sys, csv, time, datetime, collections
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import run_region_map as rm            # loader, subsets, POD, ceiling, quality windows, settings
-import pod_augment_galerkin_ns as pns
-import re100_fraction_sweep as rs      # train(): the recipe of every study so far
+from rom import paths
+from rom import vae                    # train(): the recipe of every study so far
+from rom.data import load
+from rom.split import split_indices, draw_subset, SPLIT_SEED, DRAW_SEED
+from rom.pod import subset_pod, ceiling_and_project, TRUNCS, k_of
+from rom.galerkin_ns import build_ops, model_at, integrate_trajectories
+from rom.augment import (n_aug_for, fidelity, fidelity_windows, synthetic_arm, jitter_arm, real_arm,
+                         GEN_TIME, SUBSTEPS, IC_NOISE, ENERGY_TOL, MAX_TRAJ)
+from rom.vae import EPOCHS, SEC_PER_SAMPLE
+from rom.results import append_row as append, done_rows, now, LOWDATA_FIELDS as B_FIELDS
 
 # ============ CONFIG ============
 DATASETS   = ["Re50", "Re60", "Re70", "Re80", "Re100"]
 LATENT     = {"Re50": 5, "Re60": 7, "Re70": 9, "Re80": 11, "Re100": 15}
-FILES      = dict(rm.DATASETS, Re60=("Alpha0/dataRe60Alpha0_2.mat", 1500, 7),
-                               Re70=("Alpha0/dataRe70Alpha0_2.mat", 1500, 9))
 N_REAL     = [25, 50, 100]
 N_SUBSETS  = 3
 SAMPLINGS  = ["blocks", "contig"]      # blocks of 10 anywhere in the pool | one stretch of the record
-TRUNCS     = [("95%", None), ("99%", None), ("K5", 5), ("K10", 10), ("K15", 15), ("K20", 20)]
+# TRUNCS = 95% / 99% energy, K = 5, 10, 15, 20 modes (rom.pod.TRUNCS, shared with run_lowdata_subsets.py)
 K_MAX      = 20                        # operators are built once at this size and sliced
 RULE_ERROR = 0.5                       # rule after 51 cells
 RULE_HEAD  = 20.0
 LONG_EPOCHS = 1500                     # compute control
-SCREEN_CSV = os.path.join(rm._CONV, "lowdata_screen.csv")
-TRAIN_CSV  = os.path.join(rm._CONV, "lowdata_results.csv")
+SCREEN_CSV = os.path.join(paths.RESULTS, "lowdata_screen.csv")
+TRAIN_CSV  = os.path.join(paths.RESULTS, "lowdata_results.csv")
 FALLBACK   = {"Re50": "K10", "Re60": "K10", "Re70": "95%", "Re80": "95%", "Re100": "95%"}
 # ================================
-rm.DATASETS = FILES
+# files and caps of Re50..Re100: rom.data.DATASETS
 
 A_FIELDS = ["date", "dataset", "Re", "n_real", "sampling", "subset", "trunc", "K", "energy_K_pct",
             "pod_ceiling_Ek", "quality_err", "quality_blowup_frac", "quality_windows",
             "gen_keep_frac", "gen_n_traj", "gen_status", "seconds"]
-B_FIELDS = ["date", "dataset", "n_real", "sampling", "subset", "kind", "latent", "generator", "trunc", "K",
-            "energy_K_pct", "fraction", "epochs", "n_aug", "n_train", "pod_ceiling_Ek", "baseline_Ek",
-            "headroom", "quality_err", "predicted", "Ek", "gain", "detR", "status", "wall_s"]
+# B_FIELDS (lowdata_results.csv) = rom.results.LOWDATA_FIELDS, shared with run_lowdata_subsets.py
 
 
 def _args(argv):
     o = {"plan": False, "stage": "AB", "datasets": DATASETS, "n": N_REAL, "subsets": N_SUBSETS,
-         "epochs": rm.EPOCHS, "sampling": "blocks"}
+         "epochs": EPOCHS, "sampling": "blocks"}
     it = iter(argv)
     for a in it:
         if a == "--plan": o["plan"] = True
@@ -93,64 +95,6 @@ def _args(argv):
     return o
 
 
-def now():
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-
-
-def append(path, fields, row):
-    new = not os.path.exists(path)
-    with open(path, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fields)
-        if new: w.writeheader()
-        w.writerow({k: row.get(k, "") for k in fields})
-
-
-def done_rows(path, keyfn):
-    if not os.path.exists(path):
-        return set()
-    return {keyfn(r) for r in csv.DictReader(open(path, newline=""))}
-
-
-def draw_subset(sampling, pool_set, pool_idx, Nt, n, rng):
-    """blocks: blocks of 10 anywhere in the training pool (as in every earlier round).
-    contig: one stretch of the record, that is n consecutive snapshots of the pool, which is what
-    a short experiment would actually give (the held-out validation snapshots are skipped)."""
-    if sampling == "blocks":
-        return rm.draw_blocks(pool_set, Nt, n, rng)
-    start = int(rng.integers(0, len(pool_idx) - n + 1))
-    return np.sort(np.asarray(pool_idx)[start:start + n])
-
-
-def build_ops(P, K, re_, path):
-    """Projected NS operators with K modes, plus the mode scaling. l[:K, :K+1] and
-    q[:K, :K+1, :K+1] of a larger build are exactly the operators of a smaller truncation."""
-    C, H, W = P["shape"]
-    dx, dy = pns.grid_spacing(path)
-    kappa = np.sqrt(dx * dy)
-    U = (P["Xc"].T @ P["Wp"][:, :K]).astype(np.float64)
-    Pu = np.empty((K + 1, H, W)); Pv = np.empty((K + 1, H, W))
-    mf = P["x_mean"].astype(np.float64).reshape(C, H, W); Pu[0], Pv[0] = mf[0], mf[1]
-    md = (U / kappa).T.reshape(K, C, H, W); Pu[1:], Pv[1:] = md[:, 0], md[:, 1]
-    del U, md
-    l, q = pns.galerkin_operators_ns(Pu, Pv, dx, dy, re_)
-    del Pu, Pv
-    return l, q, kappa
-
-
-def model_at(l_big, q_big, kappa, A, K, dt):
-    """Slice the operators to K modes and return (step, s, to_b, from_b)."""
-    l, q = l_big[:K, :K + 1], q_big[:K, :K + 1, :K + 1]
-    s = (A[:, :K] * kappa).std(axis=0); s = np.where(s < 1e-14, 1.0, s)
-    step = pns.make_step_ns(l, q, s, dt, rm.SUBSTEPS)
-    return step, s, (lambda a: a * kappa / s), (lambda b: b * s / kappa)
-
-
-def k_of(P, trunc, n):
-    name, fixed = trunc
-    K = rm.k_for(P, 0.95) if name == "95%" else rm.k_for(P, 0.99) if name == "99%" else fixed
-    return int(min(K, P["A"].shape[1], n - 1))
-
-
 # ------------------------------------------------------------------ stage A
 
 def stage_a(o):
@@ -166,18 +110,18 @@ def stage_a(o):
     for ds, n, sm, sub in todo:
         by_ds.setdefault(ds, []).append((n, sm, sub))
     for ds, items in by_ds.items():
-        data, re_, dt, path = rm.load(ds)
+        data, re_, dt, path = load(ds)
         Nt = len(data)
-        val_idx, pool_idx, _ = rm.cs.split_indices(Nt, None, "random", rm.SPLIT_SEED)
+        val_idx, pool_idx, _ = split_indices(Nt, None, "random", SPLIT_SEED)
         pool_set = set(int(i) for i in pool_idx)
         val_real = data[val_idx]
-        steps = max(1, int(round(rm.GEN_TIME / dt)))
+        steps = max(1, int(round(GEN_TIME / dt)))
         for n, sm, sub in items:
             t0 = time.time()
-            rng = np.random.default_rng([rm.DRAW_SEED, int(re_), n, sub] + ([] if sm == "blocks" else [911]))
+            rng = np.random.default_rng([DRAW_SEED, int(re_), n, sub] + ([] if sm == "blocks" else [911]))
             tr_idx = draw_subset(sm, pool_set, pool_idx, Nt, n, rng)
-            P = rm.subset_pod(data[tr_idx])
-            win = rm.fidelity_windows(set(int(i) for i in tr_idx), Nt, steps, rng)
+            P = subset_pod(data[tr_idx])
+            win = fidelity_windows(set(int(i) for i in tr_idx), Nt, steps, rng)
             windows = [data[t:t + steps + 1] for t in win]
             Kb = int(min(K_MAX, P["A"].shape[1], n - 1))
             l_big, q_big, kappa = build_ops(P, Kb, re_, path)
@@ -194,12 +138,12 @@ def stage_a(o):
                                                       subset=sub, trunc=name, K=K,
                                                       gen_status=f"skipped: K={K} above K_MAX={Kb}"))
                     continue
-                ceiling, win_A = rm.ceiling_and_project(P, K, val_real, windows)
-                step, s, to_b, from_b = model_at(l_big, q_big, kappa, A, K, dt)
-                err, blow = rm.fidelity(step, to_b, from_b, win_A, steps) if win_A else (float("nan"), "")
+                ceiling, win_A = ceiling_and_project(P, K, val_real, windows)
+                step, s, to_b, from_b = model_at(l_big, q_big, kappa, A, K, dt, SUBSTEPS)
+                err, blow = fidelity(step, to_b, from_b, win_A, steps) if win_A else (float("nan"), "")
                 try:
-                    _, st = pns.integrate_trajectories(step, s, to_b(A[:, :K]), n, steps, rm.IC_NOISE,
-                                                       rm.ENERGY_TOL, 4000, np.random.default_rng([7, K, n]))
+                    _, st = integrate_trajectories(step, s, to_b(A[:, :K]), n, steps, IC_NOISE,
+                                                   ENERGY_TOL, 4000, np.random.default_rng([7, K, n]))
                     gen, keep, ntraj = "ok", round(st["keep_frac"], 4), st["n_traj"]
                 except Exception as e:
                     gen, keep, ntraj = str(e).splitlines()[0][:80], "", ""
@@ -278,12 +222,12 @@ def stage_b(o):
             for gen, f, ep in arms:
                 if (ds, str(n), sm, str(sub), "aug", gen, str(round(f, 4)), str(ep or o["epochs"]),
                         pick_trunc(ds, n, sm)) not in done:
-                    samples += n + rs.n_aug_for(f, n)
+                    samples += n + n_aug_for(f, n)
         if ds == "Re50" and n == 50:                       # compute control
             for sub in range(o["subsets"]):
                 if (ds, str(n), sm, str(sub)) not in long_done:
                     samples += n * LONG_EPOCHS / o["epochs"]
-    print(f"[low]  stage B: about {samples * rm.SEC_PER_SAMPLE * o['epochs'] / 500 / 3600:.1f} h of "
+    print(f"[low]  stage B: about {samples * SEC_PER_SAMPLE * o['epochs'] / 500 / 3600:.1f} h of "
           f"training  ->  {TRAIN_CSV}", flush=True)
     if o["plan"] or not conds:
         return
@@ -293,36 +237,35 @@ def stage_b(o):
     for ds, n, arms in conds:
         by_ds.setdefault(ds, []).append((n, arms))
     for ds, items in by_ds.items():
-        data, re_, dt, path = rm.load(ds)
+        data, re_, dt, path = load(ds)
         Nt = len(data)
-        val_idx, pool_idx, _ = rm.cs.split_indices(Nt, None, "random", rm.SPLIT_SEED)
+        val_idx, pool_idx, _ = split_indices(Nt, None, "random", SPLIT_SEED)
         pool_set = set(int(i) for i in pool_idx)
         val_real = data[val_idx]
-        steps = max(1, int(round(rm.GEN_TIME / dt)))
+        steps = max(1, int(round(GEN_TIME / dt)))
         for n, arms in items:
             tname = pick_trunc(ds, n, sm)
             trunc = [t for t in TRUNCS if t[0] == tname][0]
             for sub in range(o["subsets"]):
-                rng = np.random.default_rng([rm.DRAW_SEED, int(re_), n, sub] + ([] if sm == "blocks" else [911]))
+                rng = np.random.default_rng([DRAW_SEED, int(re_), n, sub] + ([] if sm == "blocks" else [911]))
                 tr_idx = draw_subset(sm, pool_set, pool_idx, Nt, n, rng)
                 train_real = data[tr_idx]
-                win = rm.fidelity_windows(set(int(i) for i in tr_idx), Nt, steps, rng)
-                P = rm.subset_pod(train_real)
+                win = fidelity_windows(set(int(i) for i in tr_idx), Nt, steps, rng)
+                P = subset_pod(train_real)
                 K = k_of(P, trunc, n)
                 windows = [data[t:t + steps + 1] for t in win]
-                ceiling, win_A = rm.ceiling_and_project(P, K, val_real, windows)
+                ceiling, win_A = ceiling_and_project(P, K, val_real, windows)
                 A = np.asarray(P["A"][:, :K], dtype=np.float64)
                 info = dict(dataset=ds, n_real=n, sampling=sm, subset=sub, latent=LATENT[ds], trunc=tname, K=K,
                             energy_K_pct=round(100 * P["e_cum"][K - 1], 3), pod_ceiling_Ek=round(ceiling, 3))
                 print(f"\n[low]  ===== {ds} {n} real ({sm}) subset {sub}: {tname} K={K}, ceiling "
                       f"{ceiling:.1f}%, {len(win_A)} quality windows =====", flush=True)
-                rs.LATENT = LATENT[ds]
 
                 key = (ds, str(n), sm, str(sub))
                 if key not in base_done:
-                    rs.EPOCHS = o["epochs"]
-                    ek, detR, _, wall = rs.train(train_real, np.empty((0,) + train_real.shape[1:], np.float32),
-                                                 val_real, tag=f"{ds} n={n} s{sub} real only")
+                    ek, detR, _, wall = vae.train(train_real, np.empty((0,) + train_real.shape[1:], np.float32),
+                                                  val_real, tag=f"{ds} n={n} s{sub} real only",
+                                                  latent=LATENT[ds], epochs=o["epochs"])
                     base_done[key] = float(ek)
                     append(TRAIN_CSV, B_FIELDS, dict(info, date=now(), kind="baseline", n_train=n,
                                                      epochs=o["epochs"], Ek=round(float(ek), 4),
@@ -331,9 +274,9 @@ def stage_b(o):
                 base = base_done.get(key)
 
                 if ds == "Re50" and n == 50 and key not in long_done:
-                    rs.EPOCHS = LONG_EPOCHS
-                    ek, detR, _, wall = rs.train(train_real, np.empty((0,) + train_real.shape[1:], np.float32),
-                                                 val_real, tag=f"{ds} n={n} s{sub} real only {LONG_EPOCHS} epochs")
+                    ek, detR, _, wall = vae.train(train_real, np.empty((0,) + train_real.shape[1:], np.float32),
+                                                  val_real, tag=f"{ds} n={n} s{sub} real only {LONG_EPOCHS} epochs",
+                                                  latent=LATENT[ds], epochs=LONG_EPOCHS)
                     long_done.add(key)
                     append(TRAIN_CSV, B_FIELDS, dict(info, date=now(), kind="baseline_long", n_train=n,
                                                      epochs=LONG_EPOCHS, Ek=round(float(ek), 4),
@@ -341,14 +284,13 @@ def stage_b(o):
                                                      gain=round(float(ek) - base, 3) if base else "",
                                                      detR=round(float(detR), 6), status="ok", wall_s=round(wall)))
                     print(f"[low]  real-only Ek with {LONG_EPOCHS} epochs: {ek:.2f}%", flush=True)
-                    rs.EPOCHS = o["epochs"]
 
                 qerr = None
                 step = s = to_b = from_b = None
                 if any(g == "galerkin_ns" for g, _, _ in arms):
                     l_big, q_big, kappa = build_ops(P, K, re_, path)
-                    step, s, to_b, from_b = model_at(l_big, q_big, kappa, A, K, dt)
-                    qerr, _ = rm.fidelity(step, to_b, from_b, win_A, steps) if win_A else (None, "")
+                    step, s, to_b, from_b = model_at(l_big, q_big, kappa, A, K, dt, SUBSTEPS)
+                    qerr, _ = fidelity(step, to_b, from_b, win_A, steps) if win_A else (None, "")
                     del l_big, q_big
                     print(f"[low]  quality error {qerr:.3f}", flush=True)
 
@@ -356,29 +298,19 @@ def stage_b(o):
                     ep = ep or o["epochs"]
                     if (ds, str(n), sm, str(sub), "aug", gen, str(round(f, 4)), str(ep), tname) in done:
                         continue
-                    na = rs.n_aug_for(f, n)
+                    na = n_aug_for(f, n)
                     t0 = time.time()
                     try:
                         if gen == "galerkin_ns":
-                            B_new, st = pns.integrate_trajectories(step, s, to_b(A), na, steps, rm.IC_NOISE,
-                                                                   rm.ENERGY_TOL, rm.MAX_TRAJ,
-                                                                   np.random.default_rng([rm.DRAW_SEED, int(re_), n, sub, K]))
-                            aug = pns.reconstruct(P["x_mean"], P["Xc"], P["Wp"][:, :K], from_b(B_new), P["shape"])
+                            aug, st = synthetic_arm(step, s, to_b, from_b, P, A, K, na, steps,
+                                                    np.random.default_rng([DRAW_SEED, int(re_), n, sub, K]),
+                                                    kick=IC_NOISE, energy_tol=ENERGY_TOL, max_traj=MAX_TRAJ)
                         elif gen == "jitter":
-                            grng = np.random.default_rng([rm.DRAW_SEED, int(re_), n, sub, K, 7777])
-                            rows_ = grng.integers(0, len(A), size=na)
-                            A_new = A[rows_] + rm.IC_NOISE * A.std(axis=0)[None, :] * grng.standard_normal((na, K))
-                            aug = pns.reconstruct(P["x_mean"], P["Xc"], P["Wp"][:, :K], A_new, P["shape"])
+                            grng = np.random.default_rng([DRAW_SEED, int(re_), n, sub, K, 7777])
+                            aug = jitter_arm(P, A, K, na, grng, kick=IC_NOISE)
                         else:
-                            grng = np.random.default_rng([rm.DRAW_SEED, int(re_), n, sub, K, 7777])
-                            avail = np.setdiff1d(pool_idx, tr_idx)
-                            take = min(na, len(avail))
-                            extra = np.sort(grng.choice(avail, size=take, replace=False))
-                            U = (P["Xc"].T @ P["Wp"][:, :K]).astype(np.float32)
-                            A_x = (data[extra].reshape(take, -1) - P["x_mean"]) @ U
-                            del U
-                            aug = pns.reconstruct(P["x_mean"], P["Xc"], P["Wp"][:, :K], A_x, P["shape"])
-                            na = take
+                            grng = np.random.default_rng([DRAW_SEED, int(re_), n, sub, K, 7777])
+                            aug, na = real_arm(P, K, data, pool_idx, tr_idx, na, grng, project=True, cap=True)
                     except Exception as err:
                         msg = str(err).splitlines()[0][:160]
                         print(f"[low]  !! {gen} f={f}: generation failed ({msg})", flush=True)
@@ -388,8 +320,9 @@ def stage_b(o):
                     headroom = ceiling - base
                     pred = "" if (gen != "galerkin_ns" or qerr is None) else \
                         ("gain" if (qerr <= RULE_ERROR and headroom >= RULE_HEAD) else "no gain")
-                    ek, detR, _, wall = rs.train(train_real, aug[:na], val_real,
-                                                 tag=f"{ds} n={n} s{sub} {gen} f={f:.2f} K={K}")
+                    ek, detR, _, wall = vae.train(train_real, aug[:na], val_real,
+                                                  tag=f"{ds} n={n} s{sub} {gen} f={f:.2f} K={K}",
+                                                  latent=LATENT[ds], epochs=o["epochs"])
                     append(TRAIN_CSV, B_FIELDS, dict(info, date=now(), kind="aug", generator=gen,
                                                      fraction=round(f, 4), epochs=ep, n_aug=na, n_train=n + na,
                                                      baseline_Ek=round(base, 4), headroom=round(headroom, 3),
@@ -408,7 +341,6 @@ def stage_b(o):
 
 def main():
     o = _args(sys.argv[1:])
-    rs.EPOCHS = o["epochs"]
     if "A" in o["stage"]:
         stage_a(o)
     if "B" in o["stage"]:

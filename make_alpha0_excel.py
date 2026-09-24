@@ -33,7 +33,7 @@ from openpyxl import Workbook
 from openpyxl.chart import ScatterChart, Series, Reference
 from openpyxl.styles import Font, Alignment
 
-import convergence_split as cs
+from rom import split as cs
 
 SPLIT    = cs.check_mode(sys.argv[1] if len(sys.argv) > 1 else "random")
 _AUG_DIR = cs.aug_dir(SPLIT)

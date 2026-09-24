@@ -20,8 +20,8 @@ Output: printed table + ../../convergence/pod_modes_assessment[_tailval].csv
 import os, sys, csv
 import numpy as np
 
-from pod_augment_galerkin_ns import load_data
-import convergence_split as cs
+from rom.data import load_data
+from rom import split as cs
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _DATA = os.path.normpath(os.path.join(_HERE, "..", "DATA"))

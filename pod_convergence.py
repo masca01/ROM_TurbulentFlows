@@ -43,8 +43,8 @@ import os, sys
 import numpy as np
 import matplotlib.pyplot as plt
 
-from pod_augment_galerkin_ns import load_data
-import convergence_split as cs
+from rom.data import load_data
+from rom import split as cs
 
 # ------------ Folder layout ------------
 _HERE     = os.path.dirname(os.path.abspath(__file__))
@@ -213,7 +213,7 @@ def main():
 
     # ---- record the last (converged) point in the shared CSV ----
     import re
-    from convergence_csv import update_row
+    from rom.results import update_row
     m = re.search(r"Re(\d+)", base)
     csv_path = cs.csv_path(DATA_FILE, SPLIT)
     update_row(csv_path, base, {

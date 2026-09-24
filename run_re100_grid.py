@@ -35,10 +35,13 @@ each is 500 epochs on n_real (1 + f/(1-f)) snapshots, roughly 1.5 s per epoch pe
 import os, sys, csv, time, datetime
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import re100_fraction_sweep as rs                 # summer settings, generate_pool(), train()
-import re100_conv_fraction_sweep as cs            # assess_pod(), draw_subset(), pod_val_error()
-import pod_augment_galerkin as pg
+from rom import paths
+from rom import augment                           # summer settings, generate_pool(), n_aug_for()
+from rom import vae                               # train(): the recipe of every study
+from rom.data import load_data
+from rom.pod import assess_pod, pod_val_error
+from rom.split import draw_pool_subset, RE100_DRAW_SEED
+from rom.results import rewrite_with_row
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _CONV = os.path.normpath(os.path.join(_HERE, "..", "..", "convergence"))
@@ -51,6 +54,7 @@ FRACTIONS  = [0.0, 0.25, 0.5, 2/3, 0.75]      # synthetic fraction of the traini
 LATENT     = 5                                # summer network
 CSV_OUT    = os.path.join(_CONV, "re100_tol_modes_grid.csv")
 SEC_PER_EPOCH_PER_1000 = 1.5                  # for the time estimate only
+DATA_FILE  = os.path.join(paths.DATA, augment.SUMMER_FILE)
 # ================================
 
 FIELDS = ["date", "generator", "modes", "tolerances", "n_real", "subset_mode", "fraction", "n_aug", "n_train",
@@ -91,22 +95,18 @@ def load_done():
 
 
 def append_row(row):
-    rows = list(csv.DictReader(open(CSV_OUT, newline=""))) if os.path.exists(CSV_OUT) else []
-    rows.append(row)
-    with open(CSV_OUT, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS); w.writeheader()
-        for r in rows: w.writerow({k: r.get(k, "") for k in FIELDS})
+    rewrite_with_row(CSV_OUT, FIELDS, row)
 
 
 def main():
     plan = _cli(sys.argv[1:])
-    rs.GENERATOR, rs.LATENT = GENERATOR, LATENT
+    n_rom = dict(augment.SUMMER_N_ROM)                # model size of the shared generator (set per K below)
     fr = sorted(set(FRACTIONS)); tols = sorted(set(TOLERANCES))
     T0 = time.time()
-    data, _ = pg.load_data(rs.DATA_FILE)
+    data, _ = load_data(DATA_FILE)
     Nt = len(data)
-    rng = np.random.default_rng(rs.RNG_SEED)
-    idx = rng.permutation(Nt); n_val = max(1, round(rs.VAL_FRAC * Nt))
+    rng = np.random.default_rng(augment.SUMMER_SEED)
+    idx = rng.permutation(Nt); n_val = max(1, round(augment.SUMMER_VAL_FRAC * Nt))
     val_idx, pool_idx = np.sort(idx[:n_val]), np.sort(idx[n_val:])
     pool, val = data[pool_idx].copy(), data[val_idx].copy()
     del data
@@ -121,7 +121,7 @@ def main():
     cases = []                                        # (K, n_real, [tols], e_pool)
     for K in MODES:
         print(f"\n[grid]  ==== STEP A: POD convergence with {K} modes ====", flush=True)
-        rows, _ = cs.assess_pod(pool, val, K)
+        rows, _ = assess_pod(pool, val, K)
         by_n = {}
         for t in tols:
             by_n.setdefault(converged_n(rows, t), []).append(t)
@@ -131,9 +131,9 @@ def main():
     n_train_total = 0; secs = 0.0
     print(f"\n[grid]  PLAN ({len(cases)} distinct (modes, n_real) cases x {len(fr)} fractions):")
     for K, n_real, tl, e_pool in cases:
-        n_augs = [rs.n_aug_for(f, n_real) for f in fr]
+        n_augs = [augment.n_aug_for(f, n_real) for f in fr]
         todo = [(f, na) for f, na in zip(fr, n_augs) if (GENERATOR, K, n_real, na, LATENT) not in done]
-        est = sum(rs.EPOCHS * SEC_PER_EPOCH_PER_1000 * (n_real + na) / 1000 for _, na in todo)
+        est = sum(vae.EPOCHS * SEC_PER_EPOCH_PER_1000 * (n_real + na) / 1000 for _, na in todo)
         n_train_total += len(todo); secs += est
         print(f"    K={K:2d}  n_real={n_real:3d}  tolerances {', '.join(f'{100*t:g}%' for t in tl):28s} "
               f"synthetic {n_augs}   {len(todo)} training(s) to do (~{est/60:.0f} min)")
@@ -143,20 +143,20 @@ def main():
 
     # ---- step B ----
     for K, n_real, tl, e_pool in cases:
-        rs.N_ROM[GENERATOR] = K
-        n_augs = [rs.n_aug_for(f, n_real) for f in fr]
+        n_rom[GENERATOR] = K
+        n_augs = [augment.n_aug_for(f, n_real) for f in fr]
         todo = [(f, na) for f, na in zip(fr, n_augs) if (GENERATOR, K, n_real, na, LATENT) not in done]
         if not todo:
             print(f"\n[grid]  K={K} n_real={n_real}: all fractions already done — skipping"); continue
         print(f"\n[grid]  ======== K = {K} modes, n_real = {n_real} (tolerances "
               f"{', '.join(f'{100*t:g}%' for t in tl)}), {subset_mode} subset ========", flush=True)
-        sub = cs.draw_subset(n_pool, n_real, subset_mode, np.random.default_rng(cs.DRAW_SEED))
+        sub = draw_pool_subset(n_pool, n_real, subset_mode, np.random.default_rng(RE100_DRAW_SEED))
         train_real, sub_idx = pool[sub], pool_idx[sub]
-        e_sub = cs.pod_val_error(train_real, val, K)
+        e_sub = pod_val_error(train_real, val, K)
         n_max = max(na for _, na in todo)
-        gen_rng = np.random.default_rng(rs.RNG_SEED + K)          # trajectory rng for this case
+        gen_rng = np.random.default_rng(augment.SUMMER_SEED + K)          # trajectory rng for this case
         try:
-            train_aug, info = (rs.generate_pool(train_real, sub_idx, n_max, gen_rng) if n_max else
+            train_aug, info = (augment.generate_pool(train_real, sub_idx, n_max, gen_rng, GENERATOR, n_rom[GENERATOR], DATA_FILE) if n_max else
                                (None, {"rom_energy": float("nan"), "n_traj": "", "keep_frac": float("nan")}))
         except Exception as err:                                  # e.g. the model cannot fill the pool
             msg = (f"{datetime.datetime.now():%Y-%m-%d %H:%M}  {GENERATOR}  K={K}  n_real={n_real}: "
@@ -175,7 +175,8 @@ def main():
             if (f, n_aug) not in todo: continue
             print(f"\n[grid]  ---- K={K} n_real={n_real} fraction {f:.3f}: + {n_aug} synthetic ----", flush=True)
             aug_n = train_aug[:n_aug] if n_aug else np.empty((0,) + train_real.shape[1:], np.float32)
-            ek, detR, vl, dt = rs.train(train_real, aug_n, val, tag=f"K={K} n={n_real} f={f:.2f}")
+            ek, detR, vl, dt = vae.train(train_real, aug_n, val, tag=f"K={K} n={n_real} f={f:.2f}",
+                                         latent=LATENT, epochs=vae.EPOCHS)
             if n_aug == 0: ek0 = ek
             append_row({"date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), "generator": GENERATOR,
                         "modes": K, "tolerances": " ".join(f"{100*t:g}%" for t in tl), "n_real": n_real,
@@ -183,7 +184,7 @@ def main():
                         "n_aug": n_aug, "n_train": n_real + n_aug, "n_val": n_val,
                         "rom_energy_pct": round(100 * info["rom_energy"], 3) if n_aug else "",
                         "n_traj": info["n_traj"] if n_aug else "", "keep_frac": round(info["keep_frac"], 4) if n_aug else "",
-                        "latent": LATENT, "epochs": rs.EPOCHS, "seed": rs.TORCH_SEED,
+                        "latent": LATENT, "epochs": vae.EPOCHS, "seed": vae.TORCH_SEED,
                         "Ek": round(float(ek), 4), "e": round(1 - float(ek) / 100, 6), "detR": round(float(detR), 6),
                         "gain_vs_f0": round(float(ek) - ek0, 3) if (ek0 is not None and n_aug) else "",
                         "POD_Ek_max_nreal": round(100 * (1 - e_sub), 3), "POD_Ek_max_pool": round(100 * (1 - e_pool), 3),

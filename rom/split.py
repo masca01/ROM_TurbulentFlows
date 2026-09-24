@@ -1,4 +1,6 @@
 """
+(from convergence_split.py, plus the real-subset draws of the later studies)
+
 One place that defines HOW the record is split into training pool / validation
 for the convergence studies, and WHERE each variant stores its results, so the
 POD script, the NN script, the mode assessment, the driver and the Excel builder
@@ -34,9 +36,15 @@ that already exist stay untouched.
 import os
 import numpy as np
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_DATA = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
-_CONV = os.path.normpath(os.path.join(_HERE, "..", "..", "convergence"))
+from . import paths
+
+_DATA = paths.DATA
+_CONV = paths.RESULTS
+
+SPLIT_SEED     = 7        # seed of the random 10 % validation split, every study
+DRAW_SEED      = 2026     # real-subset draws of the region map and every later study
+BLOCK          = 10       # consecutive snapshots per block (the data-identified fit needs them)
+RE100_DRAW_SEED = 11      # re100_conv_fraction_sweep.py / run_re100_grid.py subset draws
 
 #          mode:  (validation fraction, file suffix, is the validation the tail?)
 _MODES = {
@@ -112,3 +120,47 @@ def assessment_path(mode):
 
 def spectra_path(mode):
     return os.path.join(_CONV, f"pod_spectra{suffix(mode)}.npz")
+
+
+# ------------------------------ real-subset draws ------------------------------
+
+def draw_blocks(pool_set, Nt, n_real, rng):
+    """n_real record indices made of non-overlapping blocks of BLOCK consecutive snapshots,
+    every block entirely inside the training pool.  (run_region_map.py)"""
+    starts = [t for t in range(Nt - BLOCK + 1) if all((t + j) in pool_set for j in range(BLOCK))]
+    rng.shuffle(starts)
+    taken, chosen = set(), []
+    for t in starts:
+        blk = range(t, t + BLOCK)
+        if taken.isdisjoint(blk):
+            chosen.append(t); taken.update(blk)
+        if len(chosen) * BLOCK >= n_real:
+            break
+    if len(chosen) * BLOCK < n_real:
+        raise RuntimeError(f"cannot fit {n_real // BLOCK} blocks of {BLOCK} in the pool")
+    return np.array(sorted(i for t in chosen for i in range(t, t + BLOCK)))[:n_real]
+
+
+def draw_subset(sampling, pool_set, pool_idx, Nt, n, rng):
+    """blocks: blocks of 10 anywhere in the training pool (as in every earlier round).
+    contig: one stretch of the record, that is n consecutive snapshots of the pool, which is what
+    a short experiment would actually give (the held-out validation snapshots are skipped).
+    (run_lowdata.py)"""
+    if sampling == "blocks":
+        return draw_blocks(pool_set, Nt, n, rng)
+    start = int(rng.integers(0, len(pool_idx) - n + 1))
+    return np.sort(np.asarray(pool_idx)[start:start + n])
+
+
+def draw_pool_subset(n_pool, n_real, mode, rng):
+    """Positions in the Re100 summer pool: a plain random draw, or random BLOCKS of BLOCK
+    consecutive snapshots for the data-identified generator.  (re100_conv_fraction_sweep.py)"""
+    if mode == "random" or n_real >= n_pool:
+        return np.sort(rng.choice(n_pool, size=n_real, replace=False)) if n_real < n_pool else np.arange(n_pool)
+    n_blocks = int(np.ceil(n_real / BLOCK))
+    starts = np.sort(rng.choice(n_pool - BLOCK + 1, size=n_blocks, replace=False))
+    idx = np.unique(np.concatenate([np.arange(s, s + BLOCK) for s in starts]))
+    while len(idx) < n_real:                                    # top up overlaps
+        extra = rng.choice(np.setdiff1d(np.arange(n_pool), idx), size=n_real - len(idx), replace=False)
+        idx = np.unique(np.concatenate([idx, extra]))
+    return np.sort(rng.choice(idx, size=n_real, replace=False)) if len(idx) > n_real else idx

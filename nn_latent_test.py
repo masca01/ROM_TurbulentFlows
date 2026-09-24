@@ -29,9 +29,9 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import beta_vae as bv
-import convergence_split as cs
+from rom import vae as bv
+from rom.data import load_data
+from rom import split as cs
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _DATA = os.path.normpath(os.path.join(_HERE, "..", "DATA"))
@@ -203,7 +203,7 @@ def main():
         if not os.path.exists(path):
             print(f"!! missing {path} — skipping"); continue
 
-        data, _ = bv.load_data(path, COMP_IDX, T_STRIDE, CAP)
+        data, _ = load_data(path, COMP_IDX, T_STRIDE, CAP)
         Nt, C, H, W = data.shape
         val_idx, pool_idx, n_val = cs.split_indices(Nt, None, split, SPLIT_SEED)
         N_pool = len(pool_idx)

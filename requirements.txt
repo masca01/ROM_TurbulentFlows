@@ -1,0 +1,10 @@
+# Exactly the third-party packages the code imports, pinned to the versions the refactor
+# was verified with (Python 3.11, CPU). Install with:  python3 -m pip install -r requirements.txt
+numpy==2.4.6
+scipy==1.17.1
+torch==2.14.0
+h5py==3.16.0
+matplotlib==3.11.2
+openpyxl==3.1.5
+# tests only
+pytest==9.1.1

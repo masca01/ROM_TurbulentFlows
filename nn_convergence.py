@@ -42,10 +42,10 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-# Reuse the identical network + metrics + losses from beta_vae.py (same folder).
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import beta_vae as bv
-import convergence_split as cs
+# The identical network + metrics + losses of beta_vae.py, from rom.
+from rom import vae as bv
+from rom.data import load_data
+from rom import split as cs
 
 # ------------ Folder layout ------------
 _HERE     = os.path.dirname(os.path.abspath(__file__))
@@ -159,7 +159,7 @@ def train_one_vae(train_data, val_real, C, H, W, epochs, seed, tag=""):
 
 
 def main():
-    data, comp_names = bv.load_data(DATA_FILE, COMP_IDX, T_STRIDE, T_MAX)
+    data, comp_names = load_data(DATA_FILE, COMP_IDX, T_STRIDE, T_MAX)
     Nt, C, H, W = data.shape
     print(f"[{STRATEGY}]  {os.path.basename(DATA_FILE)}  |  {Nt} snapshots, "
           f"{C}x{H}x{W}   device = {DEVICE}", flush=True)
@@ -250,7 +250,7 @@ def main():
 
     # ---- record the last (converged) point in the shared CSV ----
     import re
-    from convergence_csv import update_row
+    from rom.results import update_row
     m = re.search(r"Re(\d+)", base)
     csv_path = cs.csv_path(DATA_FILE, SPLIT)
     update_row(csv_path, base, {

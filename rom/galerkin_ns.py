@@ -41,12 +41,13 @@ def grid_spacing(path):
     """Get the grid spacing dx, dy from the coordinate arrays in the file.
     The x/y grids are uniform, so I take the gap between the first two distinct
     coordinate values along each axis.  The arrays are named DataX/DataY in some
-    files and X/Y in others; if neither is there I fall back to the Readme value."""
+    files, X/Y in others and x_points/y_points in the channel planes; if none is
+    there I fall back to the Readme value."""
     try:
         import h5py
         with h5py.File(path, "r") as f:
-            xkey = "DataX" if "DataX" in f else "X"
-            ykey = "DataY" if "DataY" in f else "Y"
+            xkey = next(k for k in ("DataX", "X", "x_points") if k in f)    # x_points / y_points:
+            ykey = next(k for k in ("DataY", "Y", "y_points") if k in f)    # the channel planes
             X = np.unique(np.asarray(f[xkey]).ravel())
             Y = np.unique(np.asarray(f[ykey]).ravel())
         dx = float(X[1] - X[0])

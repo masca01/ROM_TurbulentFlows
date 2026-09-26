@@ -50,6 +50,10 @@ def test_loaders_every_layout():
         d, re_, dt, path = data.load(name)
         assert d.shape[1] == 2 and re_ == float(name[2:])
     assert gns.grid_spacing(RE50) == (0.25, 0.25)
+    d, re_, dt, path = data.load_channel("chan")
+    assert d.shape == (200, 2, 16, 32) and re_ == 20000 and abs(dt - 0.1) < 1e-12
+    dx, dy = gns.grid_spacing(path)
+    assert abs(dx - 8 * np.pi / 32) < 1e-12 and abs(dy - 2 / 15) < 1e-12
 
 
 def test_split_and_draws():
@@ -149,6 +153,8 @@ DRY_RUNS = [
     (S + "5_low_data/run_lowdata.py", "--stage", "A", "--datasets", "Re50", "--n", 25, "--subsets", 1),
     (S + "5_low_data/run_lowdata_subsets.py", "--plan"),
     (S + "6_capacity/run_capacity.py", "--plan"),
+    (S + "7_channel/run_channel.py", "--stage", "A", "--n", 20, "--subsets", 1),
+    (S + "7_channel/run_channel.py", "--stage", "B", "--n", 20, "--subsets", 1, "--epochs", 1),
 ]
 
 

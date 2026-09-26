@@ -142,6 +142,54 @@ def load_data(path, comp_idx=None, t_stride=1, t_max=None):
     return data, names
 
 
+# ------------------------- Channel flow (JHTDB, x-y plane) -------------------------
+
+CHANNEL_NU = 5e-5        # JHTDB channel viscosity in units of the half-height h and bulk velocity: Re = 1/nu
+#          name:     (file relative to paths.DATA, time stride, snapshot cap)
+CHANNEL = {
+    "chan":     ("CHANNEL_Turbulence/channelFull_xy_z0.50_1024x256_Nt2000_UVW.mat", 1, None),   # x in [0, 8 pi), y in [-1, 1]
+    "chanHalf": ("CHANNEL_Turbulence/channelEdge_256x256_Nt4000_UVW.mat",          2, 2000),   # x in [0, pi],   y in [0, 1]
+}
+
+
+def load_channel(name, comps=(0, 1)):
+    """One x-y plane of the JHTDB channel (getDataCode/GetChannelData_Matlab_JHTDB.m).
+    Returns data [Nt, 2, Ny, Nx] float32 with the in-plane components u, v (NOT u, w, which is
+    what load_data picks for a 3-component U), Re = 1/nu, dt, path.
+    MATLAB's U [Nt, Ny, Nx, 3] is (3, Nx, Ny, Nt) in h5py. A download still in progress can be
+    used: only the leading run of finished snapshots (the file's 'done' vector) is read."""
+    fn, stride, cap = CHANNEL[name]
+    path = os.path.join(paths.DATA, fn)
+    import h5py
+    with h5py.File(path, "r") as f:
+        U = f["U"]
+        _, Nx, Ny, nt_file = U.shape
+        n_ok = nt_file
+        if "done" in f:
+            done = np.array(f["done"]).ravel().astype(bool)
+            n_ok = nt_file if done.all() else int(np.argmin(done))
+        t_idx = np.arange(0, n_ok, stride)
+        if cap is not None:
+            t_idx = t_idx[:cap]
+        if len(t_idx) == 0:
+            raise RuntimeError(f"{fn}: no finished snapshot yet")
+        times = np.array(f["times"]).ravel()
+        dt = float(times[stride] - times[0])
+        data = np.empty((len(t_idx), len(comps), Ny, Nx), dtype=np.float32)
+        B = 100 * stride                                     # time steps read per block
+        out = 0
+        for t0 in range(0, int(t_idx[-1]) + 1, B):
+            t1 = min(t0 + B, int(t_idx[-1]) + 1)
+            blk = np.asarray(U[:, :, :, t0:t1], dtype=np.float32)[list(comps)]   # [C, Nx, Ny, nb]
+            blk = blk.transpose(3, 0, 2, 1)[::stride]                           # [nb/stride, C, Ny, Nx]
+            data[out:out + len(blk)] = blk
+            out += len(blk)
+    if n_ok < nt_file:
+        print(f"[load]  {name}: download in progress, {n_ok} of {nt_file} snapshots finished")
+    print(f"[load]  {name}: {data.shape} (u, v), Re {1 / CHANNEL_NU:g}, dt {dt:g}", flush=True)
+    return data, 1.0 / CHANNEL_NU, dt, path
+
+
 def load(name):
     """[Nt, 2, H, W] float32, Re, dt, path. Reads only the first `cap` snapshots of the big
     Alpha0 files straight from disk (the generic loader reads all 5000 first)."""

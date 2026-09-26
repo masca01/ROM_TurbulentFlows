@@ -8,6 +8,9 @@ without the 138 GB of .mat files.
                                               (x fastest), DataX, DataY; no Re / dt (as the old file)
     CHANNEL/channel_fake_UVW.mat              MATLAB v5: U [Nt, Nz, Nx, 3], the layout the study-1
                                               scripts (pod.py, analysis.py, inspect_vae.py) read
+    CHANNEL_Turbulence/channelFull_xy_...mat  MATLAB v7.3: U [Nt, Ny, Nx, 3] (h5py (3, Nx, Ny, Nt)),
+                                              x_points, y_points, times, done: the full-plane download
+                                              that studies/7_channel reads (rom.data.load_channel)
 
 The flow is a mean wake plus a few travelling waves and a little noise, so the POD has a
 dominant low-rank part and a full-rank tail, like the real data.
@@ -54,7 +57,8 @@ def _flow(nt, nx, ny, dx, dy, dt, re, seed):
     return u, v, X, Y
 
 
-def make(data_dir, nt_alpha0=1500, nt_re100=1000, nx=24, ny=16, nx100=20, ny100=12, nt_channel=120):
+def make(data_dir, nt_alpha0=1500, nt_re100=1000, nx=24, ny=16, nx100=20, ny100=12, nt_channel=120,
+         nt_plane=200):
     """Write every fake dataset under data_dir; returns data_dir."""
     for i, re in enumerate((50, 60, 70, 80)):
         dt = 0.2
@@ -74,6 +78,13 @@ def make(data_dir, nt_alpha0=1500, nt_re100=1000, nx=24, ny=16, nx100=20, ny100=
     os.makedirs(os.path.join(data_dir, "CHANNEL"), exist_ok=True)
     sio.savemat(os.path.join(data_dir, "CHANNEL", "channel_fake_UVW.mat"),
                 {"U": np.stack([u, v, w], axis=-1).astype(np.float32)})     # [Nt, Nz, Nx, 3]
+    # full channel plane: 32 x 16 points, dt 0.1, so 2 h/U_b is 20 snapshots
+    u, v, _, _ = _flow(nt_plane, 32, 16, 8 * np.pi / 32, 2 / 15, 0.1, 180, seed=13)   # [Nt, Nx, Ny]
+    U = np.stack([u, v, 0.1 * u], axis=0)                                              # (3, Nt, Nx, Ny)
+    _mat73(os.path.join(data_dir, "CHANNEL_Turbulence", "channelFull_xy_z0.50_1024x256_Nt2000_UVW.mat"),
+           {"U": U.transpose(0, 2, 3, 1).astype(np.float32),                            # (3, Nx, Ny, Nt)
+            "x_points": (np.arange(32) * 8 * np.pi / 32)[:, None], "y_points": np.linspace(-1, 1, 16)[:, None],
+            "times": (np.arange(nt_plane) * 0.1)[:, None], "done": np.ones((nt_plane, 1), dtype=np.uint8)})
     return data_dir
 
 

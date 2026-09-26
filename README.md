@@ -6,7 +6,7 @@ equations projected on POD modes) improve the β-VAE reconstruction energy **Ek*
 validation data.
 
 - `rom/` is the shared library. Importing it runs nothing.
-- `studies/` holds the scripts that produced the results, in pipeline order 1 → 6.
+- `studies/` holds the scripts that produced the results, in pipeline order 1 → 7.
 - `tools/` holds viewers and quick checks.
 - The data, checkpoints and results are **not** in the repository (about 138 GB).
 
@@ -165,12 +165,31 @@ The capacity-corrected headroom = min(POD ceiling, capacity ceiling) − real-on
 Run `capacity_headroom.py` again after every new `run_capacity.py`. `launch.sh … --then`
 does it automatically.
 
+### 7. Channel flow — `studies/7_channel/`
+
+Do the two generators (data-identified and NS-projected) help the β-VAE on wall turbulence?
+JHTDB channel, Re_tau ≈ 1000: one x–y plane over the whole domain (x in [0, 8π), wall to wall,
+1024 × 256, 2000 snapshots, dt = 0.013), downloaded with
+`getDataCode/GetChannelData_Matlab_JHTDB.m` (outside the repository). In-plane components u, v.
+
+| Command | Writes | Time |
+|---|---|---|
+| `python3 run_channel.py --plan` | nothing: cells, and hours left | seconds |
+| `python3 run_channel.py --stage A` | `channel_screen.csv`: POD ceiling, quality error of both generators, the "nothing changes" error, derivative R², generation | ~20 min |
+| `python3 run_channel.py --stage B` | `channel_results.csv`: capacity at latent 16, then real only / generator / jitter (/ real_proj) per selected cell | `--plan` prints it (~5 h) |
+| `--dataset chanHalf` | the old half-plane file instead (x in [0, π], centreline → wall) | |
+
+Quality is measured over 2 h/U_b, where assuming "nothing changes" gives an error ≈ 1 (as the
+10 convective times of the wake did), on 14 windows in the last 25 % of the record, which no
+real subset uses. Stage B trains the cells that pass the screen and, where nothing passes,
+the least unfaithful cell anyway, so the "no gain" prediction is tested too.
+
 ## `rom/` at a glance
 
 | Module | Contents |
 |---|---|
 | `paths.py` | `DATA`, `AUGMENTED`, `MODELS`, `RESULTS` |
-| `data.py` | dataset registry (file, snapshot cap, latent), `load_data` (all .mat layouts), `load` (fast Alpha0 reader) |
+| `data.py` | dataset registry (file, snapshot cap, latent), `load_data` (all .mat layouts), `load` (fast Alpha0 reader), `load_channel` (channel x–y planes, u and v) |
 | `split.py` | split modes random / tail / tail5 / tail2.5, seeds, subset draws (blocks, contiguous, Re 100 pool) |
 | `pod.py` | POD by snapshots, POD ceiling, modes for an energy level, low-data truncations, POD convergence at K modes |
 | `vae.py` | Encoder / Decoder, loss, Ek, det(R), the shared `train()` |

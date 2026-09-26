@@ -116,7 +116,7 @@ def integrate_trajectories(step, s, B_real, n_aug, horizon,
 
 # ------------------------- The NS Galerkin projection -------------------------
 
-def galerkin_operators_ns(Pu, Pv, dx, dy, re):
+def galerkin_operators_ns(Pu, Pv, dx, dy, re, forcing_x=0.0):
     """Build the Galerkin operators l and q by projecting the Navier-Stokes
     convection and diffusion terms onto the modes.  This is a vectorized version
     of Dawson's nseGalerkinCoeffsDemo.m (same integrals, just done with matrix
@@ -126,6 +126,9 @@ def galerkin_operators_ns(Pu, Pv, dx, dy, re):
     Returns l[r, r+1] and q[r, r+1, r+1] such that
         da_i/dt = l[i,:] @ c + c @ q[i] @ c,   with c = [1, a_1..a_r].
     The image axes are H = y (spacing dy) and W = x (spacing dx).
+    forcing_x : a uniform body force in x, e.g. the imposed mean pressure gradient -dP/dx that
+                drives a channel. It projects to the constant term G INT u_i dA, stored in the
+                a_0 = 1 column of l. 0 (every wake study) leaves l unchanged.
     """
     r1, H, W = Pu.shape
     r = r1 - 1
@@ -145,6 +148,8 @@ def galerkin_operators_ns(Pu, Pv, dx, dy, re):
         lap_v[j] = np.gradient(dvx, dx, axis=1) + np.gradient(dvy, dy, axis=0)
     l = (dA / re) * (Mu @ lap_u.reshape(r1, -1).T + Mv @ lap_v.reshape(r1, -1).T)
     del lap_u, lap_v
+    if forcing_x:
+        l[:, 0] += forcing_x * dA * Mu.sum(axis=1)
 
     # Convection term
     #   q_ijk = - INT [(u_j du_k/dx + v_j du_k/dy) u_i
@@ -211,9 +216,10 @@ def derivative_R2(l, q, A_phys, tr_idx, dt):
 
 # ------------------------- Operators built once, sliced to smaller K (run_lowdata.py) -------------------------
 
-def build_ops(P, K, re_, path):
+def build_ops(P, K, re_, path, forcing_x=0.0):
     """Projected NS operators with K modes, plus the mode scaling. l[:K, :K+1] and
-    q[:K, :K+1, :K+1] of a larger build are exactly the operators of a smaller truncation."""
+    q[:K, :K+1, :K+1] of a larger build are exactly the operators of a smaller truncation.
+    forcing_x: see galerkin_operators_ns (the channel's mean pressure gradient)."""
     C, H, W = P["shape"]
     dx, dy = grid_spacing(path)
     kappa = np.sqrt(dx * dy)
@@ -222,7 +228,7 @@ def build_ops(P, K, re_, path):
     mf = P["x_mean"].astype(np.float64).reshape(C, H, W); Pu[0], Pv[0] = mf[0], mf[1]
     md = (U / kappa).T.reshape(K, C, H, W); Pu[1:], Pv[1:] = md[:, 0], md[:, 1]
     del U, md
-    l, q = galerkin_operators_ns(Pu, Pv, dx, dy, re_)
+    l, q = galerkin_operators_ns(Pu, Pv, dx, dy, re_, forcing_x)
     del Pu, Pv
     return l, q, kappa
 

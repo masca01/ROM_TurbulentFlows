@@ -64,9 +64,11 @@ done
 [ -n "$job" ] && JOBS+=("$job")
 
 cd "$REPO" || exit 1
+# the repository on the import path, so rom is found even without `pip install -e .`
+export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
 if [ -z "$LOG" ]; then
   RESULTS="$(cd / && "$PYTHON" -c 'from rom import paths; print(paths.RESULTS)' 2>/dev/null)" || {
-    echo "launch.sh: cannot import rom — run 'python3 -m pip install -e .' in $REPO first" >&2; exit 1; }
+    echo "launch.sh: cannot import rom from $REPO" >&2; exit 1; }
   first="$(eval "set -- ${JOBS[0]}"; basename "$1" .py)"
   LOG="$RESULTS/logs/${first}_$(date '+%Y%m%d_%H%M').log"
 fi

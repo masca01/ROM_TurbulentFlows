@@ -10,7 +10,9 @@ Both generators of the region map, on the same real subsets:
     galerkin     DATA-IDENTIFIED: the quadratic model da/dt = c + L a + Q(a, a) fitted to the subset's
                  own POD-coefficient series (ridge least squares on central differences)
     galerkin_ns  NS-PROJECTED: 2-D convection + diffusion projected on the subset's POD modes,
-                 nothing fitted, no pressure
+                 plus the imposed mean pressure gradient -dP/dx = 0.0025 that drives the channel
+                 (nu = 5e-5, both from the JHTDB channel README); nothing fitted, no pressure
+                 fluctuation. (On the half plane the forcing lowers the quality error by ~0.02.)
 
 What I expect, written before any number exists:
     the plane is a slice of a 3-D flow. The projected 2-D equations miss the spanwise transport
@@ -28,7 +30,7 @@ Half-plane check before the full download (chanHalf, n = 50 / 250, one subset, 2
     trajectory pieces. Nothing passes, so stage B would only contain "tested anyway" cells.
 
 STAGE A - screen, no network (a few minutes per subset).
-    n = 50, 100, 250 real snapshots x 2 samplings x 3 subsets x truncations 90% / 95% energy and
+    n = 100, 250, 500 real snapshots x 2 samplings x 3 subsets x truncations 90% / 95% energy and
     K = 5, 10, 20, 40, for BOTH generators: POD ceiling, quality error over GEN_TIME on held-out real
     windows, derivative R^2, and whether synthetic snapshots can be generated.
     Samplings: blocks10 = blocks of 10 consecutive snapshots anywhere in the pool (every earlier
@@ -51,7 +53,8 @@ STAGE B - trainings where the screen says it is worth it, plus the generators th
     1. Capacity: real only on the whole training pool (1800 snapshots), the network's own limit at
        this latent, so headroom = min(POD ceiling, capacity) - real only (capacity_headroom.py).
     2. Cells. Per n and generator, the (sampling, truncation) with the highest POD ceiling among
-       those whose mean quality error <= 0.5, that generate and whose ceiling leaves >= 20 points
+       those that are FAITHFUL (mean quality error <= half the mean "nothing changes" error, see
+       below), that generate and whose ceiling leaves >= 20 points
        (pick_trunc of run_lowdata.py) -> "screen passed". Where a generator has no such cell at
        some n, its least unfaithful cell there (ceiling >= 20) is trained anyway -> "tested anyway",
        so the prediction "no gain" is tested too.
@@ -60,7 +63,14 @@ STAGE B - trainings where the screen says it is worth it, plus the generators th
        gain from dynamics apart from a gain from noise); the "screen passed" cells also get real_proj
        (extra real snapshots projected on the same modes: what a perfect reduced model would give).
     Every generator row carries its prediction, written before its network is trained:
-    gain if quality error <= 0.5 and corrected headroom >= 20.
+    gain if quality error <= 0.5 x "nothing changes" error and corrected headroom >= 20.
+
+The rule is RELATIVE to "nothing changes" on the channel. Full-plane check (one subset per n, before
+the screen): at 2 h/U_b the no-change error on the reserved tail windows was only 0.04-0.25, against
+0.3-1.2 when the modes come from subsets spread over the whole record. Subsets from the first 75 %
+see the tail with a large near-constant offset, so an absolute limit (error <= 0.5, the wake's) would
+call a frozen model faithful. Halving the no-change error on the same windows is what error <= 0.5
+meant in the wake, where the no-change error over 10 convective times is ~1 or more.
     -> convergence/channel_results.csv
 
 Usage (from the repository folder):
@@ -77,7 +87,7 @@ import numpy as np
 
 from rom import paths
 from rom import vae
-from rom.data import load_channel
+from rom.data import load_channel, CHANNEL_DPDX
 from rom.split import split_indices, draw_blocks, SPLIT_SEED, DRAW_SEED
 from rom.pod import subset_pod, ceiling_and_project, k_for
 from rom.galerkin_ns import build_ops, model_at, derivative_R2, integrate_trajectories
@@ -90,7 +100,7 @@ from rom.results import append_row as append, done_rows, now
 # ============ CONFIG ============
 DATASET    = "chan"                    # rom.data.CHANNEL: "chan" full plane | "chanHalf" old half plane
 LATENT     = 16
-N_REAL     = [50, 100, 250]
+N_REAL     = [100, 250, 500]          # 50 dropped: on the full plane its POD ceiling is 3-9 %
 N_SUBSETS  = 3
 TRUNCS     = [("90%", 0.90), ("95%", 0.95), ("K5", 5), ("K10", 10), ("K20", 20), ("K40", 40)]
 K_MAX      = 40                        # NS operators built once at this size and sliced; the
@@ -100,7 +110,7 @@ GEN_TIME   = 2.0                       # h / U_bulk per quality window and per s
 QUALITY_TAIL = 0.25                    # last fraction of the record kept for the quality windows
 WINDOW_STRIDE = 25                     # snapshots between window starts
 FRACTION   = 0.5
-RULE_ERROR = 0.5
+RULE_SKILL = 0.5                       # faithful: quality error <= (1 - RULE_SKILL) x "nothing changes" error
 RULE_HEAD  = 20.0
 SEED_TAG   = 1000                      # in the rng seeds where the wake studies have int(Re)
 SAMPLINGS  = ["blocks10", "runs50"]
@@ -217,7 +227,7 @@ def stage_a(o):
         tr_idx, windows = S.subset(n, sm, sub)
         P = subset_pod(S.data[tr_idx])
         Kb = int(min(K_MAX, P["A"].shape[1], n - 1))
-        l_big, q_big, kappa = build_ops(P, Kb, S.re, S.path)
+        l_big, q_big, kappa = build_ops(P, Kb, S.re, S.path, forcing_x=CHANNEL_DPDX)
         A = np.asarray(P["A"][:, :Kb], dtype=np.float64)
         print(f"\n[chan]  {ds} n={n} {sm} s{sub}: {len(windows)} quality windows of {S.steps} steps, "
               f"NS operators at K={Kb}, 95% energy needs {k_for(P, 0.95)} modes [{time.time() - t0:.0f} s]",
@@ -266,9 +276,9 @@ def stage_a(o):
 # ------------------------------------------------------------------ stage B
 
 def screen_stats(ds):
-    """(n, sampling, generator, trunc) -> mean quality error, mean POD ceiling, mean K; only truncations that
-    generated on every screened subset."""
-    acc = collections.defaultdict(lambda: {"e": [], "c": [], "K": [], "ok": True})
+    """(n, sampling, generator, trunc) -> (mean quality error / mean no-change error, mean POD ceiling,
+    mean K); only truncations that generated on every screened subset."""
+    acc = collections.defaultdict(lambda: {"e": [], "c": [], "K": [], "p": [], "ok": True})
     if not os.path.exists(SCREEN_CSV):
         return {}
     for r in csv.DictReader(open(SCREEN_CSV, newline="")):
@@ -276,13 +286,15 @@ def screen_stats(ds):
             continue
         d = acc[(int(r["n_real"]), r["sampling"], r["generator"], r["trunc"])]
         try:
-            e, c = float(r["quality_err"]), float(r["pod_ceiling_Ek"])
+            e, c, pe = float(r["quality_err"]), float(r["pod_ceiling_Ek"]), float(r["persist_err"])
         except ValueError:
             d["ok"] = False; continue
         if r["gen_status"] != "ok" or not np.isfinite(e):
             d["ok"] = False
-        d["e"].append(e); d["c"].append(c); d["K"].append(int(r["K"]))
-    return {k: (float(np.mean(d["e"])), float(np.mean(d["c"])), round(float(np.mean(d["K"]))))
+        d["e"].append(e); d["c"].append(c); d["K"].append(int(r["K"])); d["p"].append(pe)
+    # value: (error / no-change error, mean POD ceiling, mean K); ratio <= 1 - RULE_SKILL is faithful
+    return {k: (float(np.mean(d["e"])) / max(float(np.mean(d["p"])), 1e-12), float(np.mean(d["c"])),
+                round(float(np.mean(d["K"]))))
             for k, d in acc.items() if d["ok"] and d["e"]}
 
 
@@ -295,7 +307,7 @@ def cells(o):
         mine = [(n, sm, t, v) for (n, sm, g, t), v in st.items() if g == gen and n in o["n"]]
         passed = []
         for n in o["n"]:
-            ok = [(sm, t, v) for nn, sm, t, v in mine if nn == n and v[0] <= RULE_ERROR and v[1] >= RULE_HEAD]
+            ok = [(sm, t, v) for nn, sm, t, v in mine if nn == n and v[0] <= 1 - RULE_SKILL and v[1] >= RULE_HEAD]
             if ok:
                 sm, t, _ = max(ok, key=lambda x: (x[2][1], -x[2][0]))       # highest ceiling
                 passed.append((n, sm, gen, t, "screen passed"))
@@ -382,7 +394,7 @@ def stage_b(o):
             A = np.asarray(P["A"][:, :Kb], dtype=np.float64)
             l_big = q_big = kappa = None
             if any(g == "galerkin_ns" for g, _, _ in arms):
-                l_big, q_big, kappa = build_ops(P, Kb, S.re, S.path)
+                l_big, q_big, kappa = build_ops(P, Kb, S.re, S.path, forcing_x=CHANNEL_DPDX)
             print(f"\n[chan]  ===== {ds} {n} real ({sm}), subset {sub}: {len(windows)} quality windows =====", flush=True)
 
             key = (str(n), sm, str(sub))
@@ -418,8 +430,8 @@ def stage_b(o):
                     if gen in GENS:
                         step, s, to_b, from_b, _ = model(gen, l_big, q_big, kappa, A, K, tr_idx, S.dt)
                         qerr, _ = fidelity(step, to_b, from_b, win_A, S.steps) if win_A else (None, "")
-                        pred = "gain" if (qerr is not None and qerr <= RULE_ERROR and head_c >= RULE_HEAD) \
-                            else "no gain"
+                        pred = "gain" if (qerr is not None and pe and qerr <= (1 - RULE_SKILL) * pe
+                                          and head_c >= RULE_HEAD) else "no gain"
                         aug, st = synthetic_arm(step, s, to_b, from_b, P, A[:, :K], K, na, S.steps,
                                                 np.random.default_rng([DRAW_SEED, SEED_TAG, n, sub, K,
                                                                        GENS.index(gen), SAMPLINGS.index(sm)]),

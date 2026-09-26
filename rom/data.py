@@ -144,7 +144,15 @@ def load_data(path, comp_idx=None, t_stride=1, t_max=None):
 
 # ------------------------- Channel flow (JHTDB, x-y plane) -------------------------
 
-CHANNEL_NU = 5e-5        # JHTDB channel viscosity in units of the half-height h and bulk velocity: Re = 1/nu
+# JHTDB channel (README-CHANNEL.pdf), units of the half-height h = 1 and bulk velocity U_b = 0.99994:
+#   domain 8 pi x 2 x 3 pi, DNS grid 2048 x 512 x 1536, no-slip walls at y = +-1, periodic in x and z;
+#   nu = 5e-5, driven by a constant mean pressure gradient -dP/dx = 0.0025 (= u_tau^2 / h),
+#   u_tau = 0.049968, Re_tau = 999.35, U_c = 1.1312; DNS dt 0.0013, stored every 5 steps
+#   (0.0065), t = 0 .. 25.9935 (4000 frames, about one flow-through).
+#   The DNS ran in a frame moving at 0.45 in x; the service returns wall-frame velocities at the
+#   requested wall-frame positions (x_DNS = x - 0.45 t, interpolated), so a fixed x is a fixed point.
+CHANNEL_NU   = 5e-5      # Re = 1/nu = 20000 (h, U_b)
+CHANNEL_DPDX = 0.0025    # -dP/dx, the driving force of the NS-projected model (forcing_x)
 #          name:     (file relative to paths.DATA, time stride, snapshot cap)
 CHANNEL = {
     "chan":     ("CHANNEL_Turbulence/channelFull_xy_z0.50_1024x256_Nt2000_UVW.mat", 1, None),   # x in [0, 8 pi), y in [-1, 1]

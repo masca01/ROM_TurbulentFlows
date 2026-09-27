@@ -50,6 +50,14 @@ def test_loaders_every_layout():
         d, re_, dt, path = data.load(name)
         assert d.shape[1] == 2 and re_ == float(name[2:])
     assert gns.grid_spacing(RE50) == (0.25, 0.25)
+    # channel round 2: eddy viscosity only on the fluctuation columns; x-homogeneous POD rebuilds
+    from rom import channel
+    d, re_, dt, path = data.load_channel("chan")
+    P = channel.channel_pod(d[:40], homogeneous_x=True)
+    assert np.allclose(pod.reconstruct(P["x_mean"], P["Xc"], P["Wp"], P["A"], P["shape"]), d[:40], atol=1e-3)
+    l, q, kap, lap = gns.build_ops(P, 5, re_, path, forcing_x=0.0025, periodic_x=True, return_lap=True)
+    lt = channel.add_eddy_viscosity(l, lap, 1e-3)
+    assert np.array_equal(lt[:, 0], l[:, 0]) and not np.allclose(lt[:, 1:], l[:, 1:])
     d, re_, dt, path = data.load_channel("chan")
     assert d.shape == (200, 2, 16, 32) and re_ == 20000 and abs(dt - 0.1) < 1e-12
     dx, dy = gns.grid_spacing(path)
@@ -155,6 +163,8 @@ DRY_RUNS = [
     (S + "6_capacity/run_capacity.py", "--plan"),
     (S + "7_channel/run_channel.py", "--stage", "A", "--n", 20, "--subsets", 1),
     (S + "7_channel/run_channel.py", "--stage", "B", "--n", 20, "--subsets", 1, "--epochs", 1),
+    (S + "7_channel/run_channel_ns.py", "--stage", "A", "--n", 30, "--subsets", 1),
+    (S + "7_channel/run_channel_ns.py", "--stage", "B", "--n", 30, "--subsets", 1, "--epochs", 1),
 ]
 
 

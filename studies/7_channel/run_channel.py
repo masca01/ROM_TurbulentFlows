@@ -87,8 +87,9 @@ import numpy as np
 
 from rom import paths
 from rom import vae
-from rom.data import load_channel, CHANNEL_DPDX
-from rom.split import split_indices, draw_blocks, SPLIT_SEED, DRAW_SEED
+from rom.data import CHANNEL_DPDX
+from rom.split import DRAW_SEED
+from rom.channel import Setup, persistence, SEED_TAG            # split, subsets, tail windows (shared with round 2)
 from rom.pod import subset_pod, ceiling_and_project, k_for
 from rom.galerkin_ns import build_ops, model_at, derivative_R2, integrate_trajectories
 from rom import galerkin_data as gd
@@ -106,15 +107,11 @@ TRUNCS     = [("90%", 0.90), ("95%", 0.95), ("K5", 5), ("K10", 10), ("K20", 20),
 K_MAX      = 40                        # NS operators built once at this size and sliced; the
                                        # data-identified fit has 1 + K + K(K+1)/2 regressors per mode
 GENS       = ["galerkin", "galerkin_ns"]
-GEN_TIME   = 2.0                       # h / U_bulk per quality window and per synthetic trajectory
-QUALITY_TAIL = 0.25                    # last fraction of the record kept for the quality windows
-WINDOW_STRIDE = 25                     # snapshots between window starts
+# quality horizon 2 h/U_b, reserved tail 25 %, window stride 25, seed tag: rom.channel
 FRACTION   = 0.5
 RULE_SKILL = 0.5                       # faithful: quality error <= (1 - RULE_SKILL) x "nothing changes" error
 RULE_HEAD  = 20.0
-SEED_TAG   = 1000                      # in the rng seeds where the wake studies have int(Re)
-SAMPLINGS  = ["blocks10", "runs50"]
-RUN        = 50                        # pool snapshots per run of the runs50 sampling
+SAMPLINGS  = ["blocks10", "runs50"]    # (same indices as rom.channel.SAMPLINGS: part of the seeds)
 SCREEN_CSV = os.path.join(paths.RESULTS, "channel_screen.csv")
 TRAIN_CSV  = os.path.join(paths.RESULTS, "channel_results.csv")
 # ================================
@@ -154,27 +151,6 @@ def k_of(P, trunc, n):
     return int(min(K, P["A"].shape[1], n - 1))
 
 
-def draw_runs(pool_idx, n, rng, run=RUN):
-    """n training indices made of non-overlapping runs of `run` consecutive POOL positions (the
-    validation snapshots in between are skipped, as in the contig sampling of run_lowdata.py)."""
-    n_runs = int(np.ceil(n / run))
-    starts = list(range(len(pool_idx) - run + 1)); rng.shuffle(starts)
-    taken, chosen = set(), []
-    for st in starts:
-        if taken.isdisjoint(range(st, st + run)):
-            chosen.append(st); taken.update(range(st, st + run))
-        if len(chosen) == n_runs:
-            break
-    pos = sorted(i for st in chosen for i in range(st, st + run))[:n]
-    return np.asarray(pool_idx)[pos]
-
-
-def persistence(win_A, steps):
-    """Quality error of a(t) = a(0): the reference every model has to beat."""
-    ident = lambda v: v
-    return fidelity(ident, ident, ident, win_A, steps)[0]
-
-
 def model(gen, l_big, q_big, kappa, A, K, tr_idx, dt):
     """(step, s, to_b, from_b, derivative R^2) of either generator at K modes.
     A = the subset's POD coefficients (vector units), at least K columns."""
@@ -185,28 +161,6 @@ def model(gen, l_big, q_big, kappa, A, K, tr_idx, dt):
     step, s, to_b, from_b = model_at(l_big, q_big, kappa, A, K, dt, SUBSTEPS)
     R2 = derivative_R2(l_big[:K, :K + 1], q_big[:K, :K + 1, :K + 1], A[:, :K] * kappa, tr_idx, dt)
     return step, s, to_b, from_b, R2
-
-
-class Setup:
-    """The dataset, its split, and the real subsets, drawn exactly the same way in both stages."""
-    def __init__(self, ds):
-        self.ds = ds
-        self.data, self.re, self.dt, self.path = load_channel(ds)
-        self.Nt = len(self.data)
-        self.val_idx, pool_all, _ = split_indices(self.Nt, None, "random", SPLIT_SEED)
-        self.pool_all = pool_all                                  # capacity: the whole training pool
-        self.t_cut = int(round((1 - QUALITY_TAIL) * self.Nt))     # quality windows live after it
-        self.pool_idx = pool_all[pool_all < self.t_cut]           # real subsets + real_proj before it
-        self.pool_set = set(int(i) for i in self.pool_idx)
-        self.val_real = self.data[self.val_idx]
-        self.steps = max(1, int(round(GEN_TIME / self.dt)))
-        self.win = list(range(self.t_cut, self.Nt - self.steps, WINDOW_STRIDE))
-
-    def subset(self, n, sm, sub):
-        rng = np.random.default_rng([DRAW_SEED, SEED_TAG, n, sub, SAMPLINGS.index(sm)])
-        tr_idx = draw_blocks(self.pool_set, self.t_cut, n, rng) if sm == "blocks10" else \
-            draw_runs(self.pool_idx, n, rng)
-        return tr_idx, [self.data[t:t + self.steps + 1] for t in self.win]
 
 
 # ------------------------------------------------------------------ stage A

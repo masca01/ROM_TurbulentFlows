@@ -179,6 +179,12 @@ JHTDB channel, Re_tau ≈ 1000: one x–y plane over the whole domain (x in [0, 
 | `python3 run_channel.py --stage B` | `channel_results.csv`: capacity at latent 16, then real only / generator / jitter (/ real_proj) per selected cell | `--plan` prints it (~5 h) |
 | `--dataset chanHalf` | the old half-plane file instead (x in [0, π], centreline → wall) | |
 
+Round 2, `run_channel_ns.py` (NS-projected only): x-homogeneous mean and periodic x-derivatives,
+eddy-viscosity closure ν_T ∈ {0, 1e-3, 3e-3, 1e-2} on the fluctuation modes, up to K = 120 modes,
+random real subsets of 500 and 1000, synthetic trajectories of 0.25 and 2 h/U_b, fractions 0.5 and 0.8,
+jitter and projected-real references, and a 1000-epoch real-only control.
+Writes `channel_ns_screen.csv` and `channel_ns_results.csv`; `--plan` prints the hours left.
+
 Quality is measured over 2 h/U_b, where assuming "nothing changes" gives an error ≈ 1 (as the
 10 convective times of the wake did), on 14 windows in the last 25 % of the record, which no
 real subset uses. Stage B trains the cells that pass the screen and, where nothing passes,
@@ -189,11 +195,12 @@ the least unfaithful cell anyway, so the "no gain" prediction is tested too.
 | Module | Contents |
 |---|---|
 | `paths.py` | `DATA`, `AUGMENTED`, `MODELS`, `RESULTS` |
+| `channel.py` | channel setup of study 7: split, subsets, reserved tail windows, "nothing changes" error, x-homogeneous POD, eddy viscosity |
 | `data.py` | dataset registry (file, snapshot cap, latent), `load_data` (all .mat layouts), `load` (fast Alpha0 reader), `load_channel` (channel x–y planes, u and v) |
 | `split.py` | split modes random / tail / tail5 / tail2.5, seeds, subset draws (blocks, contiguous, Re 100 pool) |
 | `pod.py` | POD by snapshots, POD ceiling, modes for an energy level, low-data truncations, POD convergence at K modes |
 | `vae.py` | Encoder / Decoder, loss, Ek, det(R), the shared `train()` |
-| `galerkin_ns.py` | NS-projected operators l, q (built once, sliced to smaller K), RK4, energy-band screening |
+| `galerkin_ns.py` | NS-projected operators l, q (built once, sliced to smaller K), RK4, energy-band screening; channel options: body force, periodic x, Laplacian for an eddy viscosity |
 | `galerkin_data.py` | data-identified quadratic Galerkin model |
 | `augment.py` | generator settings, summer generator, quality error, the arms: synthetic, jitter, real_proj / real_full |
 | `results.py` | CSV append / resume helpers, `lowdata_results.csv` columns, convergence last-point CSV |

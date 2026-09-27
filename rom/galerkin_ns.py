@@ -116,7 +116,15 @@ def integrate_trajectories(step, s, B_real, n_aug, horizon,
 
 # ------------------------- The NS Galerkin projection -------------------------
 
-def galerkin_operators_ns(Pu, Pv, dx, dy, re, forcing_x=0.0):
+def _grad(F, dy, dx, periodic_x):
+    """(dF/dy, dF/dx) of a 2-D field; x by periodic central differences when periodic_x."""
+    Fy, Fx = np.gradient(F, dy, dx)
+    if periodic_x:
+        Fx = (np.roll(F, -1, axis=-1) - np.roll(F, 1, axis=-1)) / (2.0 * dx)
+    return Fy, Fx
+
+
+def galerkin_operators_ns(Pu, Pv, dx, dy, re, forcing_x=0.0, periodic_x=False, return_lap=False):
     """Build the Galerkin operators l and q by projecting the Navier-Stokes
     convection and diffusion terms onto the modes.  This is a vectorized version
     of Dawson's nseGalerkinCoeffsDemo.m (same integrals, just done with matrix
@@ -129,6 +137,12 @@ def galerkin_operators_ns(Pu, Pv, dx, dy, re, forcing_x=0.0):
     forcing_x : a uniform body force in x, e.g. the imposed mean pressure gradient -dP/dx that
                 drives a channel. It projects to the constant term G INT u_i dA, stored in the
                 a_0 = 1 column of l. 0 (every wake study) leaves l unchanged.
+    periodic_x: x-derivatives by periodic central differences (a domain that is one full period in
+                x, like the whole channel plane) instead of np.gradient's one-sided edges.
+    return_lap: also return lap[r, r+1] = INT [lap(u_j) u_i + lap(v_j) v_i] dA, the diffusion
+                projection without 1/Re, so an eddy viscosity nu_T can be added later without
+                rebuilding q:  l[:, 1:] += nu_T * lap[:, 1:].
+    The defaults reproduce the wake studies exactly.
     """
     r1, H, W = Pu.shape
     r = r1 - 1
@@ -142,12 +156,20 @@ def galerkin_operators_ns(Pu, Pv, dx, dy, re, forcing_x=0.0):
     lap_u = np.empty_like(Pu)
     lap_v = np.empty_like(Pv)
     for j in range(r1):
-        duy, dux = np.gradient(Pu[j], dy, dx)
-        dvy, dvx = np.gradient(Pv[j], dy, dx)
-        lap_u[j] = np.gradient(dux, dx, axis=1) + np.gradient(duy, dy, axis=0)
-        lap_v[j] = np.gradient(dvx, dx, axis=1) + np.gradient(dvy, dy, axis=0)
-    l = (dA / re) * (Mu @ lap_u.reshape(r1, -1).T + Mv @ lap_v.reshape(r1, -1).T)
-    del lap_u, lap_v
+        if not periodic_x:
+            duy, dux = np.gradient(Pu[j], dy, dx)
+            dvy, dvx = np.gradient(Pv[j], dy, dx)
+            lap_u[j] = np.gradient(dux, dx, axis=1) + np.gradient(duy, dy, axis=0)
+            lap_v[j] = np.gradient(dvx, dx, axis=1) + np.gradient(dvy, dy, axis=0)
+        else:
+            duy, dux = _grad(Pu[j], dy, dx, True)
+            dvy, dvx = _grad(Pv[j], dy, dx, True)
+            lap_u[j] = _grad(dux, dy, dx, True)[1] + np.gradient(duy, dy, axis=0)
+            lap_v[j] = _grad(dvx, dy, dx, True)[1] + np.gradient(dvy, dy, axis=0)
+    proj = Mu @ lap_u.reshape(r1, -1).T + Mv @ lap_v.reshape(r1, -1).T
+    l = (dA / re) * proj                                  # (same expression as before: wake results unchanged)
+    lap = dA * proj if return_lap else None
+    del lap_u, lap_v, proj
     if forcing_x:
         l[:, 0] += forcing_x * dA * Mu.sum(axis=1)
 
@@ -159,13 +181,13 @@ def galerkin_operators_ns(Pu, Pv, dx, dy, re, forcing_x=0.0):
     # the test modes to fill the whole q[:, :, k] slice.
     q = np.empty((r, r1, r1))
     for k in range(r1):
-        duky, dukx = np.gradient(Pu[k], dy, dx)
-        dvky, dvkx = np.gradient(Pv[k], dy, dx)
+        duky, dukx = _grad(Pu[k], dy, dx, periodic_x)
+        dvky, dvkx = _grad(Pv[k], dy, dx, periodic_x)
         conv_u = Pu * dukx + Pv * duky                   # [r1, H, W], all j
         conv_v = Pu * dvkx + Pv * dvky
         q[:, :, k] = -dA * (Mu @ conv_u.reshape(r1, -1).T
                             + Mv @ conv_v.reshape(r1, -1).T)
-    return l, q
+    return (l, q, lap) if return_lap else (l, q)
 
 
 def make_rhs_ns(l, q, s):
@@ -216,10 +238,11 @@ def derivative_R2(l, q, A_phys, tr_idx, dt):
 
 # ------------------------- Operators built once, sliced to smaller K (run_lowdata.py) -------------------------
 
-def build_ops(P, K, re_, path, forcing_x=0.0):
+def build_ops(P, K, re_, path, forcing_x=0.0, periodic_x=False, return_lap=False):
     """Projected NS operators with K modes, plus the mode scaling. l[:K, :K+1] and
     q[:K, :K+1, :K+1] of a larger build are exactly the operators of a smaller truncation.
-    forcing_x: see galerkin_operators_ns (the channel's mean pressure gradient)."""
+    forcing_x, periodic_x, return_lap: see galerkin_operators_ns (channel options); with
+    return_lap the result is (l, q, kappa, lap)."""
     C, H, W = P["shape"]
     dx, dy = grid_spacing(path)
     kappa = np.sqrt(dx * dy)
@@ -228,9 +251,9 @@ def build_ops(P, K, re_, path, forcing_x=0.0):
     mf = P["x_mean"].astype(np.float64).reshape(C, H, W); Pu[0], Pv[0] = mf[0], mf[1]
     md = (U / kappa).T.reshape(K, C, H, W); Pu[1:], Pv[1:] = md[:, 0], md[:, 1]
     del U, md
-    l, q = galerkin_operators_ns(Pu, Pv, dx, dy, re_, forcing_x)
+    out = galerkin_operators_ns(Pu, Pv, dx, dy, re_, forcing_x, periodic_x, return_lap)
     del Pu, Pv
-    return l, q, kappa
+    return (out[0], out[1], kappa) + ((out[2],) if return_lap else ())
 
 
 def model_at(l_big, q_big, kappa, A, K, dt, substeps):

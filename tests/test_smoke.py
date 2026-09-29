@@ -165,6 +165,8 @@ DRY_RUNS = [
     (S + "7_channel/run_channel.py", "--stage", "B", "--n", 20, "--subsets", 1, "--epochs", 1),
     (S + "7_channel/run_channel_ns.py", "--stage", "A", "--n", 30, "--subsets", 1),
     (S + "7_channel/run_channel_ns.py", "--stage", "B", "--n", 30, "--subsets", 1, "--epochs", 1),
+    (S + "8_closure_wake/run_closure_wake.py", "--stage", "A", "--cells", "Re100_n100_99"),
+    (S + "8_closure_wake/run_closure_wake.py", "--stage", "B", "--cells", "Re100_n100_99", "--epochs", 1),
 ]
 
 

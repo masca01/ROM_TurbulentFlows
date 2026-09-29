@@ -6,7 +6,7 @@ equations projected on POD modes) improve the β-VAE reconstruction energy **Ek*
 validation data.
 
 - `rom/` is the shared library. Importing it runs nothing.
-- `studies/` holds the scripts that produced the results, in pipeline order 1 → 7.
+- `studies/` holds the scripts that produced the results, in pipeline order 1 → 8.
 - `tools/` holds viewers and quick checks.
 - The data, checkpoints and results are **not** in the repository (about 138 GB).
 
@@ -189,6 +189,20 @@ Quality is measured over 2 h/U_b, where assuming "nothing changes" gives an erro
 10 convective times of the wake did), on 14 windows in the last 25 % of the record, which no
 real subset uses. Stage B trains the cells that pass the screen and, where nothing passes,
 the least unfaithful cell anyway, so the "no gain" prediction is tested too.
+
+### 8. Closure on the wakes — `studies/8_closure_wake/`
+
+Does the eddy-viscosity closure of the channel (study 7, round 2) also improve the NS-projected model
+on the 2-plate wakes? Five stored cells are rebuilt exactly (same subsets, windows, modes and synthetic
+seed as the region map and round 2, N4); only the closure term changes. The plain model must reproduce
+the stored quality error, and on subset 0 of every cell the real-only and plain arms are retrained as a
+reproduction check.
+
+| Command | Writes | Time |
+|---|---|---|
+| `python3 run_closure_wake.py --plan` | nothing: best ν_T per cell and hours left | seconds |
+| `python3 run_closure_wake.py --stage A` | `closure_wake_screen.csv`: error for ν_T/ν ∈ {0, 0.03, 0.1, 0.3, 1, 3, 10, 30} | minutes |
+| `python3 run_closure_wake.py --stage B` | `closure_wake_results.csv`: gain with the closure next to the stored plain gain | `--plan` prints it |
 
 ## `rom/` at a glance
 

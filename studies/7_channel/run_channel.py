@@ -39,9 +39,9 @@ STAGE A - screen, no network (a few minutes per subset).
     trajectory for the data-identified fit, so it gets the longer runs as well.
     Horizon GEN_TIME = 2 h/U_b (154 snapshots), per quality window and per synthetic trajectory.
     Measured on the half plane: the error of "nothing changes" (a(t) = a(0)) is 0.2 at 0.5 h/U_b,
-    ~1 at 2 and saturates beyond, so at 2 h/U_b the flow has decorrelated as it had over the 10
-    convective times of the wake, and "quality error <= 0.5" again means "the model halves the error
-    of assuming nothing changes". (A first screen at 0.5 h/U_b gave NS errors of 0.15-0.35: no better
+    ~1 at 2 and saturates beyond, so at 2 h/U_b the flow has decorrelated, and "quality error <=
+    0.5 x no-change" means "the model halves the error of assuming nothing changes" (a looser
+    standard than the wake's, see the end of this docstring). (A first screen at 0.5 h/U_b gave NS errors of 0.15-0.35: no better
     than the no-change reference, so it measured nothing.) persist_err is stored next to every error.
     Quality windows: windows that long do not fit between the training snapshots, so the LAST 25 %
     of the record (6.5 h/U_b) is reserved for them. Real subsets and the real_proj snapshots come
@@ -69,8 +69,13 @@ The rule is RELATIVE to "nothing changes" on the channel. Full-plane check (one 
 the screen): at 2 h/U_b the no-change error on the reserved tail windows was only 0.04-0.25, against
 0.3-1.2 when the modes come from subsets spread over the whole record. Subsets from the first 75 %
 see the tail with a large near-constant offset, so an absolute limit (error <= 0.5, the wake's) would
-call a frozen model faithful. Halving the no-change error on the same windows is what error <= 0.5
-meant in the wake, where the no-change error over 10 convective times is ~1 or more.
+call a frozen model faithful.
+The relative rule is LOOSER than the wake's absolute one. Over 10 convective times the wake's no-change
+error is 1.3-1.8 (measured in study 8: Re100 1.69-1.79, Re80 1.34-1.53), so the wake's limit of 0.5 was
+about 0.3 of the no-change error. The wake-equivalent standard on the channel is therefore
+error <= ~0.3 x no-change; RULE_SKILL = 0.5 is kept so the stored predictions stay what they were.
+(Corrected 29 Sep 2026: this text first said the wake's no-change error was ~1, which made the two
+rules look equivalent.)
     -> convergence/channel_results.csv
 
 Usage (from the repository folder):
@@ -110,6 +115,7 @@ GENS       = ["galerkin", "galerkin_ns"]
 # quality horizon 2 h/U_b, reserved tail 25 %, window stride 25, seed tag: rom.channel
 FRACTION   = 0.5
 RULE_SKILL = 0.5                       # faithful: quality error <= (1 - RULE_SKILL) x "nothing changes" error
+                                       # (the wake's absolute 0.5 is ~0.3 x no-change: RULE_SKILL 0.7; docstring)
 RULE_HEAD  = 20.0
 SAMPLINGS  = ["blocks10", "runs50"]    # (same indices as rom.channel.SAMPLINGS: part of the seeds)
 SCREEN_CSV = os.path.join(paths.RESULTS, "channel_screen.csv")

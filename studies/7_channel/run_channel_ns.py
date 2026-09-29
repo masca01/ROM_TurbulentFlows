@@ -24,6 +24,10 @@ K = 10, error 0.21 vs 0.22) and no generator cell gained, while plain jitter at 
      jitter only adds noise. Fractions 0.5 and 0.8. n = 500 and 1000.
 Everything else as round 1: latent 16, 500 epochs, the same split, the quality windows in the last
 25 % of the record, the rule relative to "nothing changes" (faithful: error <= 0.5 x no-change).
+That rule is LOOSER than the wake's: the wake's absolute limit of 0.5 was ~0.3 of its no-change error
+(no-change 1.3-1.8 over 10 convective times, study 8), so the wake-equivalent standard is error <= ~0.3
+x no-change. The rule is kept at 0.5 so the predictions written before training stay as they were;
+results are read against both. (Corrected 29 Sep 2026: first written as if the two were the same.)
 
 STAGE A - screen, no network (~12-20 min per subset: K = 120 is the cost; ~1.5 h in all).
     n in {500, 1000} x 3 random subsets x {plain, phys} x nu_T x K: POD ceiling, quality error
@@ -51,7 +55,8 @@ STAGE B - trainings, chosen by the screen (per n, over the 3 subsets):
 
 Expectation, written before any training (after the test subset of the screen): the long-horizon
 arms gain. With nu_T = 1e-3 the model is faithful at every K (error / no-change 0.33-0.47 on the test
-subset: physics fixes + closure, K = 40-120), the first faithful NS model on the channel, and the POD
+subset: physics fixes + closure, K = 40-120; by the 0.5 rule, not by the wake-equivalent 0.3), the first
+faithful NS model on the channel, and the POD
 ceiling at K = 80-120 is 56-61 %, well above the real-only Ek of round 1 (25 % at n = 500, blocks).
 The short-horizon arms should behave like jitter or slightly better (+1 to +3): a real state advected
 for 0.25 h/U_b is a realistic new snapshot but little new information. More modes help only through
@@ -89,7 +94,7 @@ KS          = [10, 20, 40, 80, 120]
 K_MAX       = 120
 SHORT_TIME  = 0.25                      # h/U_b: short quality windows and short trajectories
 LONG_TIME   = 2.0                       # h/U_b: the round-1 quality horizon (rom.channel.GEN_TIME)
-RULE_SKILL  = 0.5
+RULE_SKILL  = 0.5                       # error <= 0.5 x no-change; wake-equivalent ~0.3 x (RULE_SKILL 0.7), see docstring
 RULE_HEAD   = 20.0
 LONG_EPOCHS = 1000                      # control: real only at n = 500
 SEC_PER_SAMPLE_CH = 0.74                # measured in round 1 (4.58 h for what 1.3 s/sample called 8.0 h)
